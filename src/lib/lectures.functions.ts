@@ -115,7 +115,7 @@ async function runTranscription(
         transcript_status: "completed",
         transcript_error: null,
         transcribed_at: new Date().toISOString(),
-        status: "processed",
+        status: "ready",
       })
       .eq("id", id)
       .eq("user_id", userId);
