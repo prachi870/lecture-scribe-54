@@ -19,6 +19,9 @@ import { Route as AuthenticatedDashboardRouteImport } from './routes/_authentica
 import { Route as AuthenticatedCoursesRouteImport } from './routes/_authenticated/courses'
 import { Route as AuthenticatedChatRouteImport } from './routes/_authenticated/chat'
 import { Route as AuthenticatedAnalyticsRouteImport } from './routes/_authenticated/analytics'
+import { Route as AuthenticatedLecturesIndexRouteImport } from './routes/_authenticated/lectures.index'
+import { Route as AuthenticatedLecturesNewRouteImport } from './routes/_authenticated/lectures.new'
+import { Route as AuthenticatedLecturesIdRouteImport } from './routes/_authenticated/lectures.$id'
 
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
@@ -69,6 +72,23 @@ const AuthenticatedAnalyticsRoute = AuthenticatedAnalyticsRouteImport.update({
   path: '/analytics',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedLecturesIndexRoute =
+  AuthenticatedLecturesIndexRouteImport.update({
+    id: '/lectures/',
+    path: '/lectures/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedLecturesNewRoute =
+  AuthenticatedLecturesNewRouteImport.update({
+    id: '/lectures/new',
+    path: '/lectures/new',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedLecturesIdRoute = AuthenticatedLecturesIdRouteImport.update({
+  id: '/lectures/$id',
+  path: '/lectures/$id',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -80,6 +100,9 @@ export interface FileRoutesByFullPath {
   '/flashcards': typeof AuthenticatedFlashcardsRoute
   '/notes': typeof AuthenticatedNotesRoute
   '/settings': typeof AuthenticatedSettingsRoute
+  '/lectures/$id': typeof AuthenticatedLecturesIdRoute
+  '/lectures/new': typeof AuthenticatedLecturesNewRoute
+  '/lectures/': typeof AuthenticatedLecturesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -91,6 +114,9 @@ export interface FileRoutesByTo {
   '/flashcards': typeof AuthenticatedFlashcardsRoute
   '/notes': typeof AuthenticatedNotesRoute
   '/settings': typeof AuthenticatedSettingsRoute
+  '/lectures/$id': typeof AuthenticatedLecturesIdRoute
+  '/lectures/new': typeof AuthenticatedLecturesNewRoute
+  '/lectures': typeof AuthenticatedLecturesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -104,6 +130,9 @@ export interface FileRoutesById {
   '/_authenticated/flashcards': typeof AuthenticatedFlashcardsRoute
   '/_authenticated/notes': typeof AuthenticatedNotesRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
+  '/_authenticated/lectures/$id': typeof AuthenticatedLecturesIdRoute
+  '/_authenticated/lectures/new': typeof AuthenticatedLecturesNewRoute
+  '/_authenticated/lectures/': typeof AuthenticatedLecturesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -117,6 +146,9 @@ export interface FileRouteTypes {
     | '/flashcards'
     | '/notes'
     | '/settings'
+    | '/lectures/$id'
+    | '/lectures/new'
+    | '/lectures/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -128,6 +160,9 @@ export interface FileRouteTypes {
     | '/flashcards'
     | '/notes'
     | '/settings'
+    | '/lectures/$id'
+    | '/lectures/new'
+    | '/lectures'
   id:
     | '__root__'
     | '/'
@@ -140,6 +175,9 @@ export interface FileRouteTypes {
     | '/_authenticated/flashcards'
     | '/_authenticated/notes'
     | '/_authenticated/settings'
+    | '/_authenticated/lectures/$id'
+    | '/_authenticated/lectures/new'
+    | '/_authenticated/lectures/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -220,6 +258,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAnalyticsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/lectures/': {
+      id: '/_authenticated/lectures/'
+      path: '/lectures'
+      fullPath: '/lectures/'
+      preLoaderRoute: typeof AuthenticatedLecturesIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/lectures/new': {
+      id: '/_authenticated/lectures/new'
+      path: '/lectures/new'
+      fullPath: '/lectures/new'
+      preLoaderRoute: typeof AuthenticatedLecturesNewRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/lectures/$id': {
+      id: '/_authenticated/lectures/$id'
+      path: '/lectures/$id'
+      fullPath: '/lectures/$id'
+      preLoaderRoute: typeof AuthenticatedLecturesIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
   }
 }
 
@@ -231,6 +290,9 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedFlashcardsRoute: typeof AuthenticatedFlashcardsRoute
   AuthenticatedNotesRoute: typeof AuthenticatedNotesRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
+  AuthenticatedLecturesIdRoute: typeof AuthenticatedLecturesIdRoute
+  AuthenticatedLecturesNewRoute: typeof AuthenticatedLecturesNewRoute
+  AuthenticatedLecturesIndexRoute: typeof AuthenticatedLecturesIndexRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
@@ -241,6 +303,9 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedFlashcardsRoute: AuthenticatedFlashcardsRoute,
   AuthenticatedNotesRoute: AuthenticatedNotesRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
+  AuthenticatedLecturesIdRoute: AuthenticatedLecturesIdRoute,
+  AuthenticatedLecturesNewRoute: AuthenticatedLecturesNewRoute,
+  AuthenticatedLecturesIndexRoute: AuthenticatedLecturesIndexRoute,
 }
 
 const AuthenticatedRouteRouteWithChildren =
