@@ -49,6 +49,7 @@ export type Database = {
       }
       lectures: {
         Row: {
+          audio_path: string | null
           audio_url: string | null
           course_id: string | null
           created_at: string
@@ -58,10 +59,15 @@ export type Database = {
           recorded_at: string | null
           status: Database["public"]["Enums"]["lecture_status"]
           title: string
+          transcribed_at: string | null
+          transcript: string | null
+          transcript_error: string | null
+          transcript_status: string
           updated_at: string
           user_id: string
         }
         Insert: {
+          audio_path?: string | null
           audio_url?: string | null
           course_id?: string | null
           created_at?: string
@@ -71,10 +77,15 @@ export type Database = {
           recorded_at?: string | null
           status?: Database["public"]["Enums"]["lecture_status"]
           title: string
+          transcribed_at?: string | null
+          transcript?: string | null
+          transcript_error?: string | null
+          transcript_status?: string
           updated_at?: string
           user_id: string
         }
         Update: {
+          audio_path?: string | null
           audio_url?: string | null
           course_id?: string | null
           created_at?: string
@@ -84,6 +95,10 @@ export type Database = {
           recorded_at?: string | null
           status?: Database["public"]["Enums"]["lecture_status"]
           title?: string
+          transcribed_at?: string | null
+          transcript?: string | null
+          transcript_error?: string | null
+          transcript_status?: string
           updated_at?: string
           user_id?: string
         }

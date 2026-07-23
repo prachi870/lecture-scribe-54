@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Sparkles } from "lucide-react";
-import { ComingSoon } from "./lectures";
+import { ComingSoon } from "@/components/coming-soon";
 
 export const Route = createFileRoute("/_authenticated/flashcards")({
   head: () => ({ meta: [{ title: "Flashcards — ALIP" }, { name: "description", content: "Spaced-repetition decks generated from your lectures." }] }),

@@ -1,19 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { Mic } from "lucide-react";
-
-export const Route = createFileRoute("/_authenticated/lectures")({
-  head: () => ({
-    meta: [
-      { title: "Lectures — ALIP" },
-      { name: "description", content: "All your recorded and uploaded lectures." },
-    ],
-  }),
-  component: Placeholder,
-});
-
-function Placeholder() {
-  return <ComingSoon title="Lectures" description="Recording and upload flow ships in Phase 2." icon={Mic} />;
-}
+import type { LucideIcon } from "lucide-react";
 
 export function ComingSoon({
   title,
@@ -22,7 +7,7 @@ export function ComingSoon({
 }: {
   title: string;
   description: string;
-  icon: typeof Mic;
+  icon: LucideIcon;
 }) {
   return (
     <div className="mx-auto flex min-h-[60vh] max-w-3xl flex-col items-center justify-center px-6 text-center">

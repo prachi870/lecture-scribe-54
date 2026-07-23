@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { BookOpen } from "lucide-react";
-import { ComingSoon } from "./lectures";
+import { ComingSoon } from "@/components/coming-soon";
 
 export const Route = createFileRoute("/_authenticated/notes")({
   head: () => ({ meta: [{ title: "Notes — ALIP" }, { name: "description", content: "Structured AI-generated notes." }] }),
