@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { BarChart3 } from "lucide-react";
-import { ComingSoon } from "./lectures";
+import { ComingSoon } from "@/components/coming-soon";
 
 export const Route = createFileRoute("/_authenticated/analytics")({
   head: () => ({ meta: [{ title: "Analytics — ALIP" }, { name: "description", content: "Track study time, retention, and weak topics." }] }),

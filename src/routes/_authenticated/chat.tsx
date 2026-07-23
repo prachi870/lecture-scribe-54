@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { MessagesSquare } from "lucide-react";
-import { ComingSoon } from "./lectures";
+import { ComingSoon } from "@/components/coming-soon";
 
 export const Route = createFileRoute("/_authenticated/chat")({
   head: () => ({ meta: [{ title: "AI Chat — ALIP" }, { name: "description", content: "Chat with your lectures." }] }),
