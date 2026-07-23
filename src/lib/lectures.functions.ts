@@ -60,7 +60,7 @@ export const finalizeLectureUpload = createServerFn({ method: "POST" })
 const IdInput = z.object({ id: z.string().uuid() });
 
 async function runTranscription(
-  supabase: Awaited<ReturnType<typeof requireSupabaseAuth.server>>["context"]["supabase"],
+  supabase: AuthedSupabase,
   userId: string,
   id: string,
 ) {
