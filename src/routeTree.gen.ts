@@ -14,7 +14,6 @@ import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedNotesRouteImport } from './routes/_authenticated/notes'
-import { Route as AuthenticatedLecturesRouteImport } from './routes/_authenticated/lectures'
 import { Route as AuthenticatedFlashcardsRouteImport } from './routes/_authenticated/flashcards'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedCoursesRouteImport } from './routes/_authenticated/courses'
@@ -43,11 +42,6 @@ const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
 const AuthenticatedNotesRoute = AuthenticatedNotesRouteImport.update({
   id: '/notes',
   path: '/notes',
-  getParentRoute: () => AuthenticatedRouteRoute,
-} as any)
-const AuthenticatedLecturesRoute = AuthenticatedLecturesRouteImport.update({
-  id: '/lectures',
-  path: '/lectures',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedFlashcardsRoute = AuthenticatedFlashcardsRouteImport.update({
@@ -84,7 +78,6 @@ export interface FileRoutesByFullPath {
   '/courses': typeof AuthenticatedCoursesRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/flashcards': typeof AuthenticatedFlashcardsRoute
-  '/lectures': typeof AuthenticatedLecturesRoute
   '/notes': typeof AuthenticatedNotesRoute
   '/settings': typeof AuthenticatedSettingsRoute
 }
@@ -96,7 +89,6 @@ export interface FileRoutesByTo {
   '/courses': typeof AuthenticatedCoursesRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/flashcards': typeof AuthenticatedFlashcardsRoute
-  '/lectures': typeof AuthenticatedLecturesRoute
   '/notes': typeof AuthenticatedNotesRoute
   '/settings': typeof AuthenticatedSettingsRoute
 }
@@ -110,7 +102,6 @@ export interface FileRoutesById {
   '/_authenticated/courses': typeof AuthenticatedCoursesRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/flashcards': typeof AuthenticatedFlashcardsRoute
-  '/_authenticated/lectures': typeof AuthenticatedLecturesRoute
   '/_authenticated/notes': typeof AuthenticatedNotesRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
 }
@@ -124,7 +115,6 @@ export interface FileRouteTypes {
     | '/courses'
     | '/dashboard'
     | '/flashcards'
-    | '/lectures'
     | '/notes'
     | '/settings'
   fileRoutesByTo: FileRoutesByTo
@@ -136,7 +126,6 @@ export interface FileRouteTypes {
     | '/courses'
     | '/dashboard'
     | '/flashcards'
-    | '/lectures'
     | '/notes'
     | '/settings'
   id:
@@ -149,7 +138,6 @@ export interface FileRouteTypes {
     | '/_authenticated/courses'
     | '/_authenticated/dashboard'
     | '/_authenticated/flashcards'
-    | '/_authenticated/lectures'
     | '/_authenticated/notes'
     | '/_authenticated/settings'
   fileRoutesById: FileRoutesById
@@ -197,13 +185,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedNotesRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/_authenticated/lectures': {
-      id: '/_authenticated/lectures'
-      path: '/lectures'
-      fullPath: '/lectures'
-      preLoaderRoute: typeof AuthenticatedLecturesRouteImport
-      parentRoute: typeof AuthenticatedRouteRoute
-    }
     '/_authenticated/flashcards': {
       id: '/_authenticated/flashcards'
       path: '/flashcards'
@@ -248,7 +229,6 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedCoursesRoute: typeof AuthenticatedCoursesRoute
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedFlashcardsRoute: typeof AuthenticatedFlashcardsRoute
-  AuthenticatedLecturesRoute: typeof AuthenticatedLecturesRoute
   AuthenticatedNotesRoute: typeof AuthenticatedNotesRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
 }
@@ -259,7 +239,6 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedCoursesRoute: AuthenticatedCoursesRoute,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedFlashcardsRoute: AuthenticatedFlashcardsRoute,
-  AuthenticatedLecturesRoute: AuthenticatedLecturesRoute,
   AuthenticatedNotesRoute: AuthenticatedNotesRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
 }
