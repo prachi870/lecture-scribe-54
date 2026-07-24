@@ -2,15 +2,18 @@ import { useState } from "react";
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { ArrowLeft, Loader2, Sparkles } from "lucide-react";
+import { ArrowLeft, Loader2, Sparkles, Link2 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import {
   createLecture,
   finalizeLectureUpload,
+  ingestLectureFromUrl,
   transcribeLecture,
   listCoursesForPicker,
 } from "@/lib/lectures.functions";
@@ -21,13 +24,13 @@ export const Route = createFileRoute("/_authenticated/lectures/new")({
   head: () => ({
     meta: [
       { title: "New lecture — ALIP" },
-      { name: "description", content: "Record or upload a lecture for AI transcription." },
+      { name: "description", content: "Record, upload, or paste a YouTube link for AI transcription and notes." },
     ],
   }),
   component: NewLecture,
 });
 
-type Mode = "record" | "upload";
+type Mode = "record" | "upload" | "url";
 
 function extFromMime(mime: string | null) {
   if (!mime) return "webm";
@@ -40,10 +43,11 @@ function extFromMime(mime: string | null) {
 
 function NewLecture() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
+  const qc = useQueryClient();
   const createFn = useServerFn(createLecture);
   const finalizeFn = useServerFn(finalizeLectureUpload);
   const transcribeFn = useServerFn(transcribeLecture);
+  const ingestFn = useServerFn(ingestLectureFromUrl);
 
   const coursesQuery = useQuery({
     queryKey: ["courses", "picker"],
@@ -53,11 +57,20 @@ function NewLecture() {
   const [mode, setMode] = useState<Mode>("record");
   const [title, setTitle] = useState("");
   const [courseId, setCourseId] = useState<string>("");
+  const [url, setUrl] = useState("");
   const [recorder, setRecorder] = useState<RecorderPanelHandle | null>(null);
   const [file, setFile] = useState<File | null>(null);
 
   const submit = useMutation({
     mutationFn: async () => {
+      if (mode === "url") {
+        if (!url.trim()) throw new Error("Paste a YouTube URL.");
+        const { id } = await ingestFn({
+          data: { url: url.trim(), course_id: courseId || null },
+        });
+        return id;
+      }
+
       const finalTitle = title.trim() || `Lecture ${new Date().toLocaleString()}`;
       let blob: Blob | null = null;
       let ext = "webm";
@@ -85,30 +98,24 @@ function NewLecture() {
       const path = `${userId}/${id}.${ext}`;
       const { error: upErr } = await supabase.storage
         .from("lecture-audio")
-        .upload(path, blob, {
-          contentType: blob.type || "audio/webm",
-          upsert: true,
-        });
+        .upload(path, blob, { contentType: blob.type || "audio/webm", upsert: true });
       if (upErr) throw new Error(upErr.message);
 
-      await finalizeFn({
-        data: { id, audio_path: path, duration_seconds: duration || null },
-      });
-
-      // Fire and forget — poll on the detail page
+      await finalizeFn({ data: { id, audio_path: path, duration_seconds: duration || null } });
       transcribeFn({ data: { id } }).catch(() => {});
-
-      await queryClient.invalidateQueries({ queryKey: ["lectures"] });
       return id;
     },
-    onSuccess: (id) => {
+    onSuccess: async (id) => {
+      await qc.invalidateQueries({ queryKey: ["lectures"] });
+      toast.success("Lecture created");
       navigate({ to: "/lectures/$id", params: { id } });
     },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
   const canSubmit =
     !submit.isPending &&
-    (mode === "record" ? !!recorder?.blob : !!file);
+    (mode === "record" ? !!recorder?.blob : mode === "upload" ? !!file : !!url.trim());
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-8">
@@ -120,19 +127,20 @@ function NewLecture() {
       </Link>
       <h1 className="mt-3 font-display text-3xl font-semibold tracking-tight">New lecture</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Record from your microphone or upload an existing audio file. ALIP transcribes it automatically.
+        Record, upload audio, or paste a YouTube link. ALIP transcribes and generates notes automatically.
       </p>
 
       <div className="mt-8 space-y-5">
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <Label htmlFor="title">Title</Label>
+            <Label htmlFor="title">Title {mode === "url" && <span className="text-xs text-muted-foreground">(auto-detected)</span>}</Label>
             <Input
               id="title"
               placeholder="e.g. Neural Networks — Lecture 4"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               className="mt-1.5"
+              disabled={mode === "url"}
             />
           </div>
           <div>
@@ -145,36 +153,41 @@ function NewLecture() {
             >
               <option value="">No course</option>
               {coursesQuery.data?.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.title}
-                </option>
+                <option key={c.id} value={c.id}>{c.title}</option>
               ))}
             </select>
           </div>
         </div>
 
-        <div className="inline-flex rounded-lg border border-border/60 bg-muted/30 p-1">
-          {(["record", "upload"] as Mode[]).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setMode(m)}
-              className={`rounded-md px-4 py-1.5 text-xs font-medium capitalize transition-colors ${
-                mode === m
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {m}
-            </button>
-          ))}
-        </div>
-
-        {mode === "record" ? (
-          <RecorderPanel onReady={setRecorder} disabled={submit.isPending} />
-        ) : (
-          <UploadDropzone file={file} onFile={setFile} />
-        )}
+        <Tabs value={mode} onValueChange={(v) => setMode(v as Mode)}>
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="record">Record</TabsTrigger>
+            <TabsTrigger value="upload">Upload</TabsTrigger>
+            <TabsTrigger value="url"><Link2 className="mr-1.5 h-3.5 w-3.5" />YouTube</TabsTrigger>
+          </TabsList>
+          <TabsContent value="record" className="mt-5">
+            <RecorderPanel onReady={setRecorder} disabled={submit.isPending} />
+          </TabsContent>
+          <TabsContent value="upload" className="mt-5">
+            <UploadDropzone file={file} onFile={setFile} />
+          </TabsContent>
+          <TabsContent value="url" className="mt-5">
+            <div className="rounded-2xl border border-border/60 bg-card/40 p-6">
+              <Label htmlFor="url">YouTube URL</Label>
+              <Input
+                id="url"
+                placeholder="https://www.youtube.com/watch?v=…"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                className="mt-1.5"
+              />
+              <p className="mt-3 text-xs text-muted-foreground">
+                We fetch the video's captions (English) and generate AI notes. Videos without
+                subtitles can't be processed — download the audio and use the Upload tab instead.
+              </p>
+            </div>
+          </TabsContent>
+        </Tabs>
 
         {submit.error && (
           <p className="text-sm text-destructive">
@@ -183,20 +196,10 @@ function NewLecture() {
         )}
 
         <div className="flex items-center justify-end gap-2 pt-2">
-          <Button asChild variant="ghost">
-            <Link to="/lectures">Cancel</Link>
-          </Button>
-          <Button
-            onClick={() => submit.mutate()}
-            disabled={!canSubmit}
-            className="shadow-lg shadow-primary/20"
-          >
-            {submit.isPending ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Sparkles className="mr-2 h-4 w-4" />
-            )}
-            {submit.isPending ? "Uploading…" : "Save & transcribe"}
+          <Button asChild variant="ghost"><Link to="/lectures">Cancel</Link></Button>
+          <Button onClick={() => submit.mutate()} disabled={!canSubmit} className="shadow-lg shadow-primary/20">
+            {submit.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+            {submit.isPending ? "Working…" : mode === "url" ? "Import & analyze" : "Save & transcribe"}
           </Button>
         </div>
       </div>
