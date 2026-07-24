@@ -150,96 +150,106 @@ function AuthPage() {
         </div>
 
         <div className="glass rounded-2xl border border-border/60 p-6">
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full border-border/60 bg-background/40 hover:bg-accent"
-            disabled={loading}
-            onClick={handleGoogle}
+          {mode !== "forgot" && (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full border-border/60 bg-background/40 hover:bg-accent"
+                disabled={loading}
+                onClick={handleGoogle}
+              >
+                <GoogleIcon className="mr-2 h-4 w-4" />
+                Continue with Google
+              </Button>
+
+              <div className="relative my-5">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t border-border/60" />
+                </div>
+                <div className="relative flex justify-center text-[11px] uppercase tracking-widest">
+                  <span className="bg-card px-2 text-muted-foreground">or</span>
+                </div>
+              </div>
+            </>
+          )}
+
+          <form
+            onSubmit={(e) => {
+              if (mode === "forgot") {
+                e.preventDefault();
+                handleForgot();
+              } else handleSubmit(e);
+            }}
+            className="space-y-4"
           >
-            <GoogleIcon className="mr-2 h-4 w-4" />
-            Continue with Google
-          </Button>
-
-          <div className="relative my-5">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t border-border/60" />
-            </div>
-            <div className="relative flex justify-center text-[11px] uppercase tracking-widest">
-              <span className="bg-card px-2 text-muted-foreground">or</span>
-            </div>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
             {mode === "signup" && (
               <div className="space-y-1.5">
-                <Label htmlFor="name" className="text-xs text-muted-foreground">
-                  Full name
-                </Label>
+                <Label htmlFor="name" className="text-xs text-muted-foreground">Full name</Label>
                 <Input
-                  id="name"
-                  autoComplete="name"
-                  value={name}
+                  id="name" autoComplete="name" value={name}
                   onChange={(e) => setName(e.target.value)}
-                  required
-                  maxLength={80}
-                  className="bg-background/40"
+                  required maxLength={80} className="bg-background/40"
                 />
               </div>
             )}
             <div className="space-y-1.5">
-              <Label htmlFor="email" className="text-xs text-muted-foreground">
-                Email
-              </Label>
+              <Label htmlFor="email" className="text-xs text-muted-foreground">Email</Label>
               <div className="relative">
                 <Mail className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  id="email"
-                  type="email"
-                  autoComplete="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  className="bg-background/40 pl-9"
+                  id="email" type="email" autoComplete="email"
+                  value={email} onChange={(e) => setEmail(e.target.value)}
+                  required className="bg-background/40 pl-9"
                   placeholder="you@university.edu"
                 />
               </div>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="password" className="text-xs text-muted-foreground">
-                Password
-              </Label>
-              <div className="relative">
-                <Lock className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  id="password"
-                  type="password"
-                  autoComplete={mode === "signin" ? "current-password" : "new-password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  minLength={8}
-                  className="bg-background/40 pl-9"
-                  placeholder="At least 8 characters"
-                />
+            {mode !== "forgot" && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="password" className="text-xs text-muted-foreground">Password</Label>
+                  {mode === "signin" && (
+                    <button type="button" onClick={() => setMode("forgot")}
+                      className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+                      Forgot?
+                    </button>
+                  )}
+                </div>
+                <div className="relative">
+                  <Lock className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="password" type="password"
+                    autoComplete={mode === "signin" ? "current-password" : "new-password"}
+                    value={password} onChange={(e) => setPassword(e.target.value)}
+                    required minLength={8} className="bg-background/40 pl-9"
+                    placeholder="At least 8 characters"
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
             <Button type="submit" disabled={loading} className="w-full">
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : mode === "signin" ? "Sign in" : "Create account"}
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : mode === "signin" ? "Sign in" : mode === "signup" ? "Create account" : "Send reset link"}
             </Button>
           </form>
         </div>
 
         <p className="mt-5 text-center text-sm text-muted-foreground">
-          {mode === "signin" ? "New to ALIP?" : "Already have an account?"}{" "}
-          <button
-            type="button"
-            onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
-            className="text-foreground underline-offset-4 hover:underline"
-          >
-            {mode === "signin" ? "Create an account" : "Sign in"}
-          </button>
+          {mode === "forgot" ? (
+            <button type="button" onClick={() => setMode("signin")}
+              className="text-foreground underline-offset-4 hover:underline">
+              Back to sign in
+            </button>
+          ) : (
+            <>
+              {mode === "signin" ? "New to ALIP?" : "Already have an account?"}{" "}
+              <button type="button" onClick={() => setMode(mode === "signin" ? "signup" : "signin")}
+                className="text-foreground underline-offset-4 hover:underline">
+                {mode === "signin" ? "Create an account" : "Sign in"}
+              </button>
+            </>
+          )}
         </p>
       </div>
     </div>
