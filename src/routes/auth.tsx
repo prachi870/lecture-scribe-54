@@ -138,12 +138,14 @@ function AuthPage() {
             <div className="h-4 w-4 rounded-sm bg-background" />
           </div>
           <h1 className="text-2xl font-semibold tracking-tight">
-            {mode === "signin" ? "Welcome back" : "Create your account"}
+            {mode === "signin" ? "Welcome back" : mode === "signup" ? "Create your account" : "Reset your password"}
           </h1>
           <p className="mt-1.5 text-sm text-muted-foreground">
             {mode === "signin"
               ? "Sign in to continue to ALIP."
-              : "Start turning lectures into understanding."}
+              : mode === "signup"
+              ? "Start turning lectures into understanding."
+              : "Enter your email and we'll send a reset link."}
           </p>
         </div>
 
