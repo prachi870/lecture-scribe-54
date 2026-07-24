@@ -28,7 +28,7 @@ const nameSchema = z.string().trim().min(1, "Name is required").max(80);
 
 function AuthPage() {
   const navigate = useNavigate();
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup" | "forgot">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -40,6 +40,24 @@ function AuthPage() {
       if (data.session) navigate({ to: "/dashboard", replace: true });
     });
   }, [navigate]);
+
+  const handleForgot = async () => {
+    setLoading(true);
+    try {
+      const parsedEmail = emailSchema.parse(email);
+      const { error } = await supabase.auth.resetPasswordForEmail(parsedEmail, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) throw error;
+      toast.success("Check your email for a reset link.");
+      setMode("signin");
+    } catch (err) {
+      if (err instanceof z.ZodError) toast.error(err.issues[0]?.message ?? "Invalid email");
+      else if (err instanceof Error) toast.error(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
