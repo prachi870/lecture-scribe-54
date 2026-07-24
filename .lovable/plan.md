@@ -1,58 +1,58 @@
-# Phase 2: Recording + Transcription
+## Phase 3 scope
 
-Build the end-to-end lecture capture pipeline: record audio in the browser, upload to storage, transcribe with AI, and display results.
+Building on Phase 1 (auth + shell) and Phase 2 (record/upload + transcription), Phase 3 makes every feature real and adds the ones you picked.
 
-## Scope
+### 1. Video URL ingestion (YouTube + others)
+- New "Paste a link" tab on `/lectures/new` alongside Record and Upload.
+- Server function `ingestLectureFromUrl(url)` runs on TanStack, uses a public transcript service (YouTube Transcript API via public endpoint) when the URL is YouTube; falls back to a clear error for non-transcript sources.
+- If a transcript is fetched directly, we skip audio storage and jump straight to `transcript_status = completed`, then run AI Notes automatically.
+- We will NOT download YouTube audio (ToS + Cloudflare Worker constraints). Non-YouTube URLs will require the user to upload the file.
 
-1. **Storage bucket** for lecture audio (private, per-user RLS).
-2. **New DB columns** on `lectures`: `audio_path`, `duration_seconds`, `transcript`, `transcript_status` (`pending` | `processing` | `completed` | `failed`), `transcript_error`, `transcribed_at`.
-3. **Recording UI** at `/_authenticated/lectures/new`:
-   - MediaRecorder-based capture (mic permission, waveform meter, pause/resume, elapsed timer).
-   - File-upload fallback (mp3/m4a/wav/webm, max ~100 MB).
-   - Title + course selector; creates a `lectures` row and uploads audio.
-4. **Transcription server function** (`transcribeLecture`) using Lovable AI Gateway (Gemini audio-capable model). Streams status updates via row `transcript_status`.
-5. **Lecture list** `/_authenticated/lectures`: cards showing status badges (Processing / Ready / Failed), duration, created date.
-6. **Lecture detail** `/_authenticated/lectures/$id`:
-   - Header with title, course, status.
-   - Audio player.
-   - Transcript panel (with retry button on failure).
-7. **Dashboard update**: "Record lecture" primary CTA links to `/lectures/new`; recent lectures list pulls real rows.
+### 2. AI Notes ("explain in easy terms")
+- New table `lecture_notes` (summary, key_points jsonb, eli5, glossary jsonb, generated_at). RLS scoped to `auth.uid()` via lecture ownership.
+- Server fn `generateLectureNotes(lectureId)` calls Lovable AI (`google/gemini-3.6-flash`) with structured output: summary, 5–10 key points, ELI5 explanation, glossary of terms.
+- Auto-triggered when transcription completes; also a manual "Regenerate notes" button.
+- Rendered on the lecture detail page in a tabbed layout: Transcript | Notes | Flashcards | Chat.
 
-Out of scope (later phases): speaker diarization, chapter/segment timestamps, chat/notes/flashcards generation, analytics graphs.
+### 3. Flashcards
+- New table `flashcards` (lecture_id, question, answer, difficulty). RLS by ownership.
+- Server fn `generateFlashcards(lectureId)` → structured array of Q/A pairs from transcript.
+- Study UI on `/flashcards`: filter by course/lecture, flip card, "Got it / Review again", spaced-review counter in localStorage.
 
-## Technical Details
+### 4. Chat with lecture
+- New table `chat_messages` (lecture_id, role, content). RLS by ownership.
+- Streaming server route `POST /api/chat` using AI SDK + Lovable Gateway; system prompt = "Answer using this lecture transcript" + transcript context.
+- Chat tab on lecture detail page uses AI Elements (`conversation`, `message`, `prompt-input`, `shimmer`).
 
-**Storage**
-- Bucket `lecture-audio`, private. RLS: `auth.uid()::text = (storage.foldername(name))[1]`. Paths: `{user_id}/{lecture_id}.{ext}`.
+### 5. Courses (real CRUD)
+- Replace `/courses` placeholder with grid + create/edit dialog (title, code, color, description).
+- Course detail page `/courses/$id` lists its lectures; lecture create flow lets you pick a course.
 
-**Server functions** (`src/lib/lectures.functions.ts`, protected with `requireSupabaseAuth`)
-- `createLecture({ title, course_id? })` → returns `{ id, upload_path }`.
-- `finalizeLectureUpload({ id, audio_path, duration_seconds })` → sets status `pending`, then invokes transcription.
-- `transcribeLecture({ id })` → signed-URL download, call Lovable AI Gateway audio transcription, update row.
-- `listLectures()`, `getLecture(id)`, `retryTranscription(id)`, `deleteLecture(id)`.
+### 6. Password reset
+- Add "Forgot password?" link on `/auth` → sends reset email via `supabase.auth.resetPasswordForEmail`.
+- New public route `/reset-password` that detects `type=recovery` and calls `updateUser({ password })`.
+- Scaffold Lovable auth email templates so the reset email is branded.
 
-**Client**
-- `useMediaRecorder` hook wrapping the Web API.
-- Upload via `supabase.storage.from('lecture-audio').upload(path, blob)` with progress.
-- TanStack Query keys: `['lectures']`, `['lecture', id]`; poll `transcript_status` every 3s while `processing`.
+### 7. UI polish pass
+- Lecture detail: hero header (course color, status, duration, timestamps), tabbed content (Transcript / Notes / Flashcards / Chat), sticky audio player.
+- Dashboard: real stats from DB (lectures count, hours transcribed, notes generated, streak).
+- Sidebar: badge counts (unread notes, pending transcripts).
+- Consistent empty states, loading skeletons, error toasts.
 
-**Model**: `google/gemini-2.5-flash` via Lovable AI Gateway with an audio input part; fall back to `google/gemini-2.5-pro` on rate-limit.
+### Technical details
 
-## File Plan
+- DB migrations (single call): `lecture_notes`, `flashcards`, `chat_messages` tables with GRANTs + RLS scoped to `auth.uid() = (SELECT user_id FROM lectures WHERE id = lecture_id)`.
+- New server fns in `src/lib/lectures.functions.ts` and `src/lib/courses.functions.ts`.
+- Chat route: `src/routes/api/chat.ts` using `createLovableAiGatewayProvider` + `streamText` + `toUIMessageStreamResponse`.
+- YouTube transcript fetch: call `https://youtubetranscript.com/?server_vid=<id>` (public, no key) inside the server fn; parse response; on failure fall back to yt-dlp is NOT possible on Worker, so return actionable error.
+- AI Elements: install `conversation message prompt-input shimmer` for chat.
+- Auth emails: `email_domain--scaffold_auth_email_templates` for branded reset email.
+- All AI calls go through Lovable AI Gateway — no user-provided keys.
 
-New:
-- `supabase/migrations/<ts>_lecture_audio.sql` (columns + bucket + policies)
-- `src/lib/lectures.functions.ts`
-- `src/hooks/use-media-recorder.ts`
-- `src/routes/_authenticated/lectures.index.tsx` (list; replaces stub)
-- `src/routes/_authenticated/lectures.new.tsx`
-- `src/routes/_authenticated/lectures.$id.tsx`
-- `src/components/lectures/{recorder-panel,upload-dropzone,transcript-view,status-badge}.tsx`
+### Out of scope
+- Downloading YouTube audio server-side (ToS + runtime).
+- Browser tab-capture / Chrome extension.
+- Real-time collaborative notes.
+- Payment / plans.
 
-Modified:
-- `src/routes/_authenticated/dashboard.tsx` (real recent lectures + CTA)
-- `src/components/app-sidebar.tsx` (no change unless needed)
-
-## Deliverable
-
-A signed-in user can record or upload a lecture, watch it transcribe, and read the transcript on its detail page.
+Approve and I'll ship it end-to-end.
