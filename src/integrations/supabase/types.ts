@@ -14,6 +14,38 @@ export type Database = {
   }
   public: {
     Tables: {
+      chat_messages: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          lecture_id: string
+          role: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          id?: string
+          lecture_id: string
+          role: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          lecture_id?: string
+          role?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_messages_lecture_id_fkey"
+            columns: ["lecture_id"]
+            isOneToOne: false
+            referencedRelation: "lectures"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       courses: {
         Row: {
           code: string | null
@@ -47,6 +79,88 @@ export type Database = {
         }
         Relationships: []
       }
+      flashcards: {
+        Row: {
+          answer: string
+          created_at: string
+          difficulty: string
+          id: string
+          lecture_id: string
+          question: string
+          updated_at: string
+        }
+        Insert: {
+          answer: string
+          created_at?: string
+          difficulty?: string
+          id?: string
+          lecture_id: string
+          question: string
+          updated_at?: string
+        }
+        Update: {
+          answer?: string
+          created_at?: string
+          difficulty?: string
+          id?: string
+          lecture_id?: string
+          question?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "flashcards_lecture_id_fkey"
+            columns: ["lecture_id"]
+            isOneToOne: false
+            referencedRelation: "lectures"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      lecture_notes: {
+        Row: {
+          created_at: string
+          eli5: string | null
+          generated_at: string | null
+          glossary: Json
+          id: string
+          key_points: Json
+          lecture_id: string
+          summary: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          eli5?: string | null
+          generated_at?: string | null
+          glossary?: Json
+          id?: string
+          key_points?: Json
+          lecture_id: string
+          summary?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          eli5?: string | null
+          generated_at?: string | null
+          glossary?: Json
+          id?: string
+          key_points?: Json
+          lecture_id?: string
+          summary?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lecture_notes_lecture_id_fkey"
+            columns: ["lecture_id"]
+            isOneToOne: true
+            referencedRelation: "lectures"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       lectures: {
         Row: {
           audio_path: string | null
@@ -57,6 +171,7 @@ export type Database = {
           duration_seconds: number | null
           id: string
           recorded_at: string | null
+          source_url: string | null
           status: Database["public"]["Enums"]["lecture_status"]
           title: string
           transcribed_at: string | null
@@ -75,6 +190,7 @@ export type Database = {
           duration_seconds?: number | null
           id?: string
           recorded_at?: string | null
+          source_url?: string | null
           status?: Database["public"]["Enums"]["lecture_status"]
           title: string
           transcribed_at?: string | null
@@ -93,6 +209,7 @@ export type Database = {
           duration_seconds?: number | null
           id?: string
           recorded_at?: string | null
+          source_url?: string | null
           status?: Database["public"]["Enums"]["lecture_status"]
           title?: string
           transcribed_at?: string | null
@@ -169,6 +286,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      owns_lecture: { Args: { _lecture_id: string }; Returns: boolean }
     }
     Enums: {
       app_role: "student" | "faculty" | "admin"
