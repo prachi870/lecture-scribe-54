@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Disallow: /dashboard
+Disallow: /lectures
+Disallow: /courses
+Disallow: /chat
+Disallow: /notes
+Disallow: /flashcards
+Disallow: /analytics
+Disallow: /settings
