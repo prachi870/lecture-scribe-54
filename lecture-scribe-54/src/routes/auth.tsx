@@ -211,26 +211,31 @@ function AuthPage() {
       // Clear any demo mode flag so Google auth is not overridden
       if (typeof window !== "undefined") localStorage.removeItem("auralearn_demo_mode");
 
-      const result = await lovable.auth.signInWithOAuth("google", {
-        redirect_uri: window.location.origin,
+      // Use Supabase client directly to start the OAuth flow. This opens the upstream
+      // Supabase /auth/v1/authorize endpoint (no local proxy) and redirects back to the
+      // app at window.location.origin after Google consent.
+      const { data: oauthData, error: oauthError } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: window.location.origin },
       });
 
-      if (result.error) {
-        const msg = result.error.message ?? "";
+      if (oauthError) {
+        const msg = oauthError.message ?? '';
         if (
-          msg.includes("provider is not enabled") ||
-          msg.includes("validation_failed") ||
-          msg.includes("OAuth") ||
-          msg.includes("missing OAuth secret")
+          msg.includes('provider is not enabled') ||
+          msg.includes('validation_failed') ||
+          msg.includes('OAuth') ||
+          msg.includes('missing OAuth secret')
         ) {
           setStatusMsg(
-            "Google OAuth Setup Required: To enable Google Sign-In, go to Supabase Dashboard → Authentication → Providers → Google and enter your Google Cloud OAuth Client ID & Secret."
+            'Google OAuth Setup Required: To enable Google Sign-In, go to Supabase Dashboard → Authentication → Providers → Google and enter your Google Cloud OAuth Client ID & Secret.'
           );
-          toast.error("Google OAuth requires Client ID & Secret in Supabase Dashboard. Use Demo Sign In below.", { duration: 8000 });
+          toast.error('Google OAuth requires Client ID & Secret in Supabase Dashboard. Use Demo Sign In below.', { duration: 8000 });
         } else {
-          throw result.error;
+          throw oauthError;
         }
       }
+      // Note: supabase.auth.signInWithOAuth performs a redirect; oauthData may be empty in that case.
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Google sign-in failed";
       toast.error(msg);

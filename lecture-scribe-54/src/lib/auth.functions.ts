@@ -1,4 +1,4 @@
-import { createServerFn } from "@tanstack/react-start";
+﻿import { createServerFn } from "@tanstack/react-start";
 import { createClient } from "@supabase/supabase-js";
 
 /**
@@ -16,9 +16,10 @@ function makeSupabaseFetch(key: string): typeof fetch {
       typeof Request !== "undefined" && input instanceof Request ? input.headers : undefined
     );
     if (init?.headers) new Headers(init.headers).forEach((v, k) => headers.set(k, v));
-    // Strip auto-added Bearer for new-format keys — they use apikey header only
-    if (isNewFormat && headers.get("Authorization") === `Bearer ${key}`) {
-      headers.delete("Authorization");
+    // Strip auto-added Authorization only if it actually contains the supabase key
+    const authHeader = headers.get('Authorization');
+    if (isNewFormat && authHeader && authHeader.includes(key)) {
+      headers.delete('Authorization');
     }
     headers.set("apikey", key);
     return fetch(input instanceof Request ? input.url : input, { ...init, headers });

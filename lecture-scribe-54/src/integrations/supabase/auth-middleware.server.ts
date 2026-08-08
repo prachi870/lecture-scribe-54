@@ -5,66 +5,66 @@ import { createClient } from '@supabase/supabase-js'
 import type { Database } from './types'
 
 function isNewSupabaseApiKey(value: string): boolean {
-  return value.startsWith('sb_publishable_') || value.startsWith('sb_secret_');
+  return value.startsWith('sb_publishable_') || value.startsWith('sb_secret_')
 }
 
 function createSupabaseFetch(supabaseKey: string): typeof fetch {
   return (input, init) => {
     const headers = new Headers(
       typeof Request !== 'undefined' && input instanceof Request ? input.headers : undefined,
-    );
+    )
 
     if (init?.headers) {
-      new Headers(init.headers).forEach((value, key) => headers.set(key, value));
+      new Headers(init.headers).forEach((value, key) => headers.set(key, value))
     }
 
-    const authHeader = headers.get('Authorization');
-    // If the Authorization header contains the supabase key itself (e.g. mistakenly set as a Bearer with the key), strip it for new-format keys.
+    const authHeader = headers.get('Authorization')
+    // If the Authorization header contains the supabase key itself, strip it for new-format keys.
     if (isNewSupabaseApiKey(supabaseKey) && authHeader && authHeader.includes(supabaseKey)) {
-      headers.delete('Authorization');
+      headers.delete('Authorization')
     }
 
-    headers.set('apikey', supabaseKey);
-    return fetch(input, { ...init, headers });
-  };
+    headers.set('apikey', supabaseKey)
+    return fetch(input instanceof Request ? input.url : input, { ...init, headers })
+  }
 }
 
 export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server(
   async ({ next }) => {
-    const SUPABASE_URL = process.env.SUPABASE_URL;
-    const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
+    const SUPABASE_URL = process.env.SUPABASE_URL
+    const SUPABASE_PUBLISHABLE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY
 
     if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
       const missing = [
         ...(!SUPABASE_URL ? ['SUPABASE_URL'] : []),
         ...(!SUPABASE_PUBLISHABLE_KEY ? ['SUPABASE_PUBLISHABLE_KEY'] : []),
-      ];
-      throw new Error(`Missing Supabase environment variables: ${missing.join(', ')}`);
+      ]
+      throw new Error(`Missing Supabase environment variables: ${missing.join(', ')}`)
     }
 
-    const request = getRequest();
+    const request = getRequest()
 
     if (!request?.headers) {
-      throw new Error('Unauthorized: No request headers available');
+      throw new Error('Unauthorized: No request headers available')
     }
 
-    const authHeader = request.headers.get('authorization');
+    const authHeader = request.headers.get('authorization')
 
     if (!authHeader) {
-      throw new Error('Unauthorized: No authorization header provided');
+      throw new Error('Unauthorized: No authorization header provided')
     }
 
     if (!authHeader.startsWith('Bearer ')) {
-      throw new Error('Unauthorized: Only Bearer tokens are supported');
+      throw new Error('Unauthorized: Only Bearer tokens are supported')
     }
 
-    const token = authHeader.replace('Bearer ', '');
+    const token = authHeader.replace('Bearer ', '')
     if (!token) {
-      throw new Error('Unauthorized: No token provided');
+      throw new Error('Unauthorized: No token provided')
     }
 
     if (token.split('.').length !== 3) {
-      throw new Error('Unauthorized: Invalid token');
+      throw new Error('Unauthorized: Invalid token')
     }
 
     const supabase = createClient<Database>(
@@ -73,25 +73,22 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
       {
         global: {
           fetch: createSupabaseFetch(SUPABASE_PUBLISHABLE_KEY!),
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
         },
         auth: {
           storage: undefined,
           persistSession: false,
           autoRefreshToken: false,
         },
-      }
-    );
+      },
+    )
 
-    const { data, error } = await supabase.auth.getClaims(token);
+    const { data, error } = await supabase.auth.getClaims(token)
     if (error || !data?.claims) {
-      throw new Error('Unauthorized: Invalid token');
+      throw new Error('Unauthorized: Invalid token')
     }
 
     if (!data.claims.sub) {
-      throw new Error('Unauthorized: No user ID found in token');
+      throw new Error('Unauthorized: No user ID found in token')
     }
 
     return next({
@@ -100,6 +97,6 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
         userId: data.claims.sub,
         claims: data.claims,
       },
-    });
+    })
   },
-);
+)

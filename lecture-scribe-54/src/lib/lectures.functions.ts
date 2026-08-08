@@ -2,9 +2,10 @@ import { createServerFn } from "@tanstack/react-start";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware.server";
 import type { Database } from "@/integrations/supabase/types";
-import { geminiChatJSON, geminiChat, geminiTranscribe, NotesSchema, FlashcardSchema, ExamPrepSchema, MindMapSchema, RevisionPlanSchema } from "./gemini";
+import { geminiChatJSON, geminiChat, geminiTranscribe } from "./gemini";
+import { NotesZ, FlashcardZ, ExamPrepZ, MindMapZ, RevisionPlanZ } from "./ai.schemas";
 
 type AuthedSupabase = SupabaseClient<Database>;
 
@@ -291,11 +292,19 @@ async function runGenerateNotes(
     throw new Error("No transcript available yet.");
   }
   const truncated = text.slice(0, 20000);
-  const notes = await geminiChatJSON<NotesShape>(
+  const notesRaw = await geminiChatJSON<unknown>(
     `Transcript:\n\n${truncated}\n\nReturn JSON with fields: summary (2-3 paragraphs), eli5 (explain like I'm 12, plain simple English, 1 paragraph), key_points (array of 5-10 short bullet strings), glossary (array of {term, definition} for 5-10 important terms).`,
     "You are an expert study-notes generator. Return ONLY valid JSON with the exact shape requested. No prose outside JSON.",
-    NotesSchema,
+    // pass the genai schema if desired; validation below will run a zod check
+    {}
   );
+
+  const parsedNotes = NotesZ.safeParse(notesRaw);
+  if (!parsedNotes.success) {
+    console.error('Notes validation failed', parsedNotes.error.format());
+    throw new Error('AI returned invalid notes format');
+  }
+  const notes = parsedNotes.data;
 
   await supabase.from("lecture_notes").upsert(
     {
@@ -346,11 +355,18 @@ export const generateFlashcards = createServerFn({ method: "POST" })
     const text = lec?.transcript ?? "";
     if (text.trim().length < 20) throw new Error("Transcript not ready yet.");
 
-    const gen = await geminiChatJSON<FlashShape>(
+    const genRaw = await geminiChatJSON<unknown>(
       `Transcript:\n\n${text.slice(0, 20000)}\n\nGenerate 8-12 quiz flashcards. Return JSON: { "cards": [ { "question": string, "answer": string, "difficulty": "easy"|"medium"|"hard" } ] }`,
       "You generate high-quality study flashcards. Return ONLY valid JSON.",
-      FlashcardSchema,
+      {},
     );
+
+    const parsed = FlashcardZ.safeParse(genRaw);
+    if (!parsed.success) {
+      console.error('Flashcards validation failed', parsed.error.format());
+      throw new Error('AI returned invalid flashcards format');
+    }
+    const gen = parsed.data as { cards: Array<{ question: string; answer: string; difficulty?: string }> };
 
     // wipe & reinsert
     await context.supabase.from("flashcards").delete().eq("lecture_id", data.id);
@@ -538,13 +554,18 @@ export const generateExamPrep = createServerFn({ method: "POST" })
     const chunks = buildTimestampedChunks(text, lec?.duration_seconds);
     const sampleChunks = chunks.slice(0, 10).map((c) => `[${c.timestamp}] ${c.text}`).join("\n");
 
-    const gen = await geminiChatJSON<ExamPrepShape>(
+    const genRaw = await geminiChatJSON<unknown>(
       `Lecture Title: "${lec?.title}"\nTranscript Excerpts:\n${sampleChunks}\n\nGenerate an Exam Prep Quiz with 5 multiple choice practice exam questions. Include RAG explanation and cited timestamp [MM:SS] for each question. Return JSON: { "title": string, "summary": string, "questions": [ { "id": number, "question": string, "options": [string, string, string, string], "answerIndex": number (0-3), "explanation": string, "timestamp": string } ] }`,
       "You generate exam preparation quizzes with detailed RAG explanations. Return ONLY valid JSON.",
-      ExamPrepSchema,
+      {},
     );
 
-    return gen;
+    const parsed = ExamPrepZ.safeParse(genRaw);
+    if (!parsed.success) {
+      console.error('ExamPrep validation failed', parsed.error.format());
+      throw new Error('AI returned invalid exam prep format');
+    }
+    return parsed.data;
   });
 
 // ---------- Concept Mind Map Generator ----------
@@ -572,13 +593,18 @@ export const generateMindMap = createServerFn({ method: "POST" })
     const text = lec?.transcript ?? "";
     if (text.trim().length < 20) throw new Error("Transcript not ready yet.");
 
-    const gen = await geminiChatJSON<MindMapShape>(
+    const genRaw = await geminiChatJSON<unknown>(
       `Lecture Title: "${lec?.title}"\nTranscript:\n${text.slice(0, 15000)}\n\nExtract a hierarchical Mind Map breakdown of 4-6 major themes/concepts discussed in this lecture. Return JSON: { "topic": string, "nodes": [ { "label": string, "summary": string, "subtopics": [string, string, string] } ] }`,
       "You generate structured concept mind maps from educational content. Return ONLY valid JSON.",
-      MindMapSchema,
+      {},
     );
 
-    return gen;
+    const parsed = MindMapZ.safeParse(genRaw);
+    if (!parsed.success) {
+      console.error('MindMap validation failed', parsed.error.format());
+      throw new Error('AI returned invalid mind map format');
+    }
+    return parsed.data;
   });
 
 // ---------- Revision Plan Generator ----------
@@ -606,13 +632,18 @@ export const generateRevisionPlan = createServerFn({ method: "POST" })
     const text = lec?.transcript ?? "";
     if (text.trim().length < 20) throw new Error("Transcript not ready yet.");
 
-    const gen = await geminiChatJSON<RevisionPlanShape>(
+    const genRaw = await geminiChatJSON<unknown>(
       `Lecture Title: "${lec?.title}"\nTranscript:\n${text.slice(0, 20000)}\n\nGenerate a structured revision study plan. Return JSON: { "title": string, "total_days": number, "daily_plan": [ { "day": number, "topic": string, "tasks": [string, string, string], "estimated_minutes": number } ] }`,
       "You generate structured revision study plans for students. Return ONLY valid JSON.",
-      RevisionPlanSchema,
+      {},
     );
 
-    return gen;
+    const parsed = RevisionPlanZ.safeParse(genRaw);
+    if (!parsed.success) {
+      console.error('RevisionPlan validation failed', parsed.error.format());
+      throw new Error('AI returned invalid revision plan format');
+    }
+    return parsed.data;
   });
 
 export const listChatMessages = createServerFn({ method: "POST" })

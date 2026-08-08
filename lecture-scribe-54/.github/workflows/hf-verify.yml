@@ -1,0 +1,25 @@
+name: Hugging Face Connectivity Verification
+
+on:
+  workflow_dispatch:
+
+jobs:
+  hf-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run HF verification script
+        env:
+          HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}
+          HUGGINGFACE_GENERATE_MODEL: ${{ secrets.HUGGINGFACE_GENERATE_MODEL }}
+          HUGGINGFACE_TRANSCRIBE_MODEL: ${{ secrets.HUGGINGFACE_TRANSCRIBE_MODEL }}
+        run: |
+          echo "Running Hugging Face connectivity verification (sanitized outputs only)"
+          node scripts/hf-verify.js
