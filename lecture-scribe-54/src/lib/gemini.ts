@@ -75,26 +75,42 @@ function getHuggingFaceApiKey() {
 }
 
 async function huggingfaceRequest(path: string, init: RequestInit) {
-  const response = await fetch(path, init);
-  const text = await response.text();
-  if (!response.ok) {
-    let message = `Hugging Face request failed with status ${response.status}`;
-    try {
-      const json = JSON.parse(text);
-      message = json.error?.message ?? JSON.stringify(json);
-    } catch {
-      if (text) message = text;
+  try {
+    const response = await fetch(path, init);
+    const text = await response.text();
+    if (!response.ok) {
+      let message = `Hugging Face request failed with status ${response.status}`;
+      try {
+        const json = JSON.parse(text);
+        message = json.error?.message ?? JSON.stringify(json);
+      } catch {
+        if (text) message = text;
+      }
+      const err: any = new Error(message);
+      err.status = response.status;
+      err.responseText = text;
+      throw err;
     }
-    const err: any = new Error(message);
-    err.status = response.status;
-    err.responseText = text;
-    throw err;
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json")) {
+      return JSON.parse(text);
+    }
+    return text;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // Classify common DNS/network errors to provide clearer DB-visible messages
+    if (/ENOTFOUND|getaddrinfo|Name or service not known|EAI_AGAIN|DNS|Name resolution/i.test(msg)) {
+      const e: any = new Error(
+        "Hugging Face DNS/network error: failed to resolve or reach api-inference.huggingface.co from the current environment. This may be a network/DNS restriction. Original error: " + msg,
+      );
+      e.original = msg;
+      throw e;
+    }
+
+    const e: any = new Error("Hugging Face network error: " + msg);
+    e.original = msg;
+    throw e;
   }
-  const contentType = response.headers.get("content-type") ?? "";
-  if (contentType.includes("application/json")) {
-    return JSON.parse(text);
-  }
-  return text;
 }
 
 async function huggingfaceTranscribeBlob(audioBlob: Blob, fileName: string): Promise<string> {
