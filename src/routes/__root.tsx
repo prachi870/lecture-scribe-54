@@ -22,18 +22,30 @@ function NotFoundComponent() {
         <p className="font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
           Error 404
         </p>
-        <h1 className="mt-3 text-5xl font-semibold tracking-tight text-foreground">
+        <h1 className="mt-3 text-4xl font-semibold tracking-tight text-foreground">
           Page not found
         </h1>
         <p className="mt-3 text-sm text-muted-foreground">
           The page you're looking for doesn't exist or has been moved.
         </p>
-        <div className="mt-6">
+        <div className="mt-6 flex flex-wrap justify-center gap-3">
           <Link
-            to="/"
+            to="/dashboard"
             className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
-            Go home
+            Go to Dashboard
+          </Link>
+          <Link
+            to="/auth"
+            className="inline-flex items-center justify-center rounded-md border border-input bg-card px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+          >
+            Sign in / Demo Access
+          </Link>
+          <Link
+            to="/"
+            className="inline-flex items-center justify-center rounded-md border border-border/60 px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Landing Page
           </Link>
         </div>
       </div>
@@ -124,7 +136,12 @@ function RootComponent() {
 
   useEffect(() => {
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-      if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
+      if (
+        event !== "SIGNED_IN" &&
+        event !== "SIGNED_OUT" &&
+        event !== "TOKEN_REFRESHED" &&
+        event !== "USER_UPDATED"
+      ) return;
       router.invalidate();
       if (event !== "SIGNED_OUT") queryClient.invalidateQueries();
     });

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { ArrowLeft, Loader2, Sparkles, Link2 } from "lucide-react";
+import { ArrowLeft, Loader2, Sparkles, Link2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import {
+  checkAIProvider,
   createLecture,
   finalizeLectureUpload,
   ingestLectureFromUrl,
@@ -23,7 +24,7 @@ import { UploadDropzone } from "@/components/lectures/upload-dropzone";
 export const Route = createFileRoute("/_authenticated/lectures/new")({
   head: () => ({
     meta: [
-      { title: "New lecture — ALIP" },
+      { title: "New lecture — AuraLearn AI" },
       { name: "description", content: "Record, upload, or paste a YouTube link for AI transcription and notes." },
     ],
   }),
@@ -48,6 +49,14 @@ function NewLecture() {
   const finalizeFn = useServerFn(finalizeLectureUpload);
   const transcribeFn = useServerFn(transcribeLecture);
   const ingestFn = useServerFn(ingestLectureFromUrl);
+
+  // Probe AI provider once on mount — surface a banner before the user wastes time uploading
+  const aiStatusQuery = useQuery({
+    queryKey: ["ai-provider-status"],
+    queryFn: () => checkAIProvider(),
+    staleTime: 60_000, // re-check at most once per minute
+    retry: false,      // don't retry on config errors
+  });
 
   const coursesQuery = useQuery({
     queryKey: ["courses", "picker"],
@@ -99,18 +108,20 @@ function NewLecture() {
       const { error: upErr } = await supabase.storage
         .from("lecture-audio")
         .upload(path, blob, { contentType: blob.type || "audio/webm", upsert: true });
-      if (upErr) throw new Error(upErr.message);
+      if (upErr) throw new Error(`Audio upload failed: ${upErr.message}`);
 
       await finalizeFn({ data: { id, audio_path: path, duration_seconds: duration || null } });
-      transcribeFn({ data: { id } }).catch(() => {});
+      transcribeFn({ data: { id } }).catch((err) => {
+        console.error("Transcription failed:", err instanceof Error ? err.message : "Unknown error");
+      });
       return id;
     },
     onSuccess: async (id) => {
       await qc.invalidateQueries({ queryKey: ["lectures"] });
-      toast.success("Lecture created");
+      toast.success(mode === "url" ? "Lecture imported! Generating notes…" : "Lecture created! Transcription is processing…");
       navigate({ to: "/lectures/$id", params: { id } });
     },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Failed"),
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Failed to create lecture"),
   });
 
   const canSubmit =
@@ -127,8 +138,19 @@ function NewLecture() {
       </Link>
       <h1 className="mt-3 font-display text-3xl font-semibold tracking-tight">New lecture</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        Record, upload audio, or paste a YouTube link. ALIP transcribes and generates notes automatically.
+        Record, upload audio, or paste a YouTube link. AuraLearn AI transcribes and generates notes automatically.
       </p>
+
+      {/* AI provider status banner */}
+      {aiStatusQuery.data && !aiStatusQuery.data.ok && (
+        <div className="mt-6 flex items-start gap-3 rounded-xl border border-warning/40 bg-warning/10 p-4 text-sm text-warning">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <p className="font-semibold">AI transcription unavailable</p>
+            <p className="mt-1 text-xs leading-relaxed opacity-90">{aiStatusQuery.data.reason}</p>
+          </div>
+        </div>
+      )}
 
       <div className="mt-8 space-y-5">
         <div className="grid gap-4 sm:grid-cols-2">

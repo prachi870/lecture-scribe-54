@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { Database } from "@/integrations/supabase/types";
+import { geminiChatJSON, geminiChat, geminiTranscribe, NotesSchema, FlashcardSchema, ExamPrepSchema, MindMapSchema, RevisionPlanSchema } from "./gemini";
 
 type AuthedSupabase = SupabaseClient<Database>;
 
@@ -68,11 +69,11 @@ async function runTranscription(
 ) {
   const { data: lecture, error: fetchErr } = await supabase
     .from("lectures")
-    .select("id, audio_path")
+    .select("id, audio_path, transcript")
     .eq("id", id)
     .eq("user_id", userId)
     .single();
-  if (fetchErr || !lecture?.audio_path) throw new Error(fetchErr?.message || "Lecture not found");
+  if (fetchErr || !lecture) throw new Error(fetchErr?.message || "Lecture not found");
 
   await supabase
     .from("lectures")
@@ -80,35 +81,25 @@ async function runTranscription(
     .eq("id", id)
     .eq("user_id", userId);
 
-  const apiKey = process.env.LOVABLE_API_KEY;
-  if (!apiKey) throw new Error("Missing LOVABLE_API_KEY");
-
   try {
-    const { data: signed, error: signErr } = await supabase.storage
-      .from("lecture-audio")
-      .createSignedUrl(lecture.audio_path, 60 * 10);
-    if (signErr || !signed?.signedUrl) throw new Error(signErr?.message || "Failed to sign audio URL");
+    let transcript = lecture.transcript?.trim() ?? "";
 
-    const audioRes = await fetch(signed.signedUrl);
-    if (!audioRes.ok) throw new Error(`Failed to fetch audio (${audioRes.status})`);
-    const audioBlob = await audioRes.blob();
+    if (!transcript) {
+      if (!lecture.audio_path) {
+        throw new Error("No audio path recorded for this lecture.");
+      }
 
-    const ext = lecture.audio_path.split(".").pop()?.toLowerCase() || "webm";
-    const form = new FormData();
-    form.append("model", "openai/gpt-4o-mini-transcribe");
-    form.append("file", audioBlob, `recording.${ext}`);
+      const { data: signed, error: signErr } = await supabase.storage
+        .from("lecture-audio")
+        .createSignedUrl(lecture.audio_path, 60 * 10);
+      if (signErr || !signed?.signedUrl) throw new Error(signErr?.message || "Failed to sign audio URL");
 
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/audio/transcriptions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}` },
-      body: form,
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`Transcription failed (${res.status}): ${body.slice(0, 300)}`);
+      const audioRes = await fetch(signed.signedUrl);
+      if (!audioRes.ok) throw new Error(`Failed to fetch audio (${audioRes.status})`);
+      const audioBlob = await audioRes.blob();
+
+      transcript = await geminiTranscribe(audioBlob, lecture.audio_path);
     }
-    const payload = (await res.json()) as { text?: string };
-    const transcript = payload.text?.trim() ?? "";
 
     await supabase
       .from("lectures")
@@ -126,12 +117,12 @@ async function runTranscription(
     try {
       await runGenerateNotes(supabase, userId, id, transcript);
     } catch (e) {
-      console.error("auto-notes failed", e);
+      console.error("Auto notes generation notice:", e);
     }
 
     return { ok: true };
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
+    const message = err instanceof Error ? err.message : "Transcription failed";
     await supabase
       .from("lectures")
       .update({ transcript_status: "failed", transcript_error: message })
@@ -196,23 +187,63 @@ async function fetchYouTubeTranscript(videoId: string): Promise<{ text: string; 
     throw new Error("Failed to parse captions.");
   }
   if (!tracks.length) throw new Error("No captions available for this video.");
-  const preferred =
-    tracks.find((t) => t.languageCode === "en" && !t.kind) ||
-    tracks.find((t) => t.languageCode === "en") ||
-    tracks[0];
-  const capUrl = preferred.baseUrl.replace(/\\u0026/g, "&") + "&fmt=json3";
-  const capRes = await fetch(capUrl);
-  if (!capRes.ok) throw new Error(`Caption fetch failed (${capRes.status})`);
-  const cap = (await capRes.json()) as {
-    events?: Array<{ segs?: Array<{ utf8?: string }> }>;
-  };
+
+  // Try every English track in order until one returns non-empty content.
+  // YouTube sometimes returns HTTP 200 with 0 bytes for certain track types
+  // depending on IP/region — iterate all en tracks as fallback.
+  const enTracks = [
+    ...tracks.filter((t) => t.languageCode === "en" && !t.kind),
+    ...tracks.filter((t) => t.languageCode === "en"),
+    ...tracks.filter((t) => t.languageCode?.startsWith("en")),
+    tracks[0],
+  ];
+  // Deduplicate by baseUrl
+  const seen = new Set<string>();
+  const uniqueTracks = enTracks.filter((t) => {
+    if (seen.has(t.baseUrl)) return false;
+    seen.add(t.baseUrl);
+    return true;
+  });
+
+  let capRaw = "";
+  let lastError = "";
+  for (const track of uniqueTracks) {
+    const capUrl = track.baseUrl.replace(/\\u0026/g, "&") + "&fmt=json3";
+    try {
+      const capRes = await fetch(capUrl);
+      if (!capRes.ok) { lastError = `HTTP ${capRes.status}`; continue; }
+      const text = await capRes.text().catch(() => "");
+      if (text && text.trim().length > 10) { capRaw = text; break; }
+      lastError = "empty response";
+    } catch (e) {
+      lastError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  if (!capRaw || !capRaw.trim()) {
+    throw new Error(
+      `No caption content could be retrieved for this video. ` +
+      `YouTube may be blocking caption access from the server (last error: ${lastError}). ` +
+      `Try a different video or download the audio and use the Upload tab.`
+    );
+  }
+
+  let cap: { events?: Array<{ segs?: Array<{ utf8?: string }> }> } = {};
+  try {
+    cap = JSON.parse(capRaw);
+  } catch {
+    throw new Error("Failed to parse YouTube subtitle track data. The response was not valid JSON.");
+  }
+
   const text = (cap.events || [])
     .map((e) => (e.segs || []).map((s) => s.utf8 || "").join(""))
     .join(" ")
     .replace(/\s+/g, " ")
     .replace(/\n/g, " ")
     .trim();
-  if (!text) throw new Error("Captions were empty.");
+  if (!text) {
+    throw new Error("The subtitle track for this YouTube video contained no text content.");
+  }
   return { text, title };
 }
 
@@ -250,52 +281,16 @@ export const ingestLectureFromUrl = createServerFn({ method: "POST" })
       .single();
     if (error) throw new Error(error.message);
 
-    // fire and forget notes
-    runGenerateNotes(context.supabase, context.userId, row.id, text).catch((e) =>
-      console.error("notes failed", e),
-    );
+    try {
+      await runGenerateNotes(context.supabase, context.userId, row.id, text);
+    } catch (e) {
+      console.error("notes failed", e);
+    }
 
     return { id: row.id };
   });
 
 // ---------- AI Notes ----------
-async function callLovableChatJSON<T>(prompt: string, systemPrompt: string): Promise<T> {
-  const apiKey = process.env.LOVABLE_API_KEY;
-  if (!apiKey) throw new Error("Missing LOVABLE_API_KEY");
-  const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "google/gemini-3.6-flash",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: prompt },
-      ],
-      response_format: { type: "json_object" },
-    }),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`AI call failed (${res.status}): ${body.slice(0, 300)}`);
-  }
-  const payload = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  const content = payload.choices?.[0]?.message?.content;
-  if (!content) throw new Error("Empty AI response");
-  try {
-    return JSON.parse(content) as T;
-  } catch {
-    // try to extract JSON block
-    const m = content.match(/\{[\s\S]*\}/);
-    if (m) return JSON.parse(m[0]) as T;
-    throw new Error("AI response was not valid JSON");
-  }
-}
-
 type NotesShape = {
   summary: string;
   eli5: string;
@@ -323,9 +318,10 @@ async function runGenerateNotes(
     throw new Error("No transcript available yet.");
   }
   const truncated = text.slice(0, 20000);
-  const notes = await callLovableChatJSON<NotesShape>(
+  const notes = await geminiChatJSON<NotesShape>(
     `Transcript:\n\n${truncated}\n\nReturn JSON with fields: summary (2-3 paragraphs), eli5 (explain like I'm 12, plain simple English, 1 paragraph), key_points (array of 5-10 short bullet strings), glossary (array of {term, definition} for 5-10 important terms).`,
     "You are an expert study-notes generator. Return ONLY valid JSON with the exact shape requested. No prose outside JSON.",
+    NotesSchema,
   );
 
   await supabase.from("lecture_notes").upsert(
@@ -377,9 +373,10 @@ export const generateFlashcards = createServerFn({ method: "POST" })
     const text = lec?.transcript ?? "";
     if (text.trim().length < 20) throw new Error("Transcript not ready yet.");
 
-    const gen = await callLovableChatJSON<FlashShape>(
+    const gen = await geminiChatJSON<FlashShape>(
       `Transcript:\n\n${text.slice(0, 20000)}\n\nGenerate 8-12 quiz flashcards. Return JSON: { "cards": [ { "question": string, "answer": string, "difficulty": "easy"|"medium"|"hard" } ] }`,
       "You generate high-quality study flashcards. Return ONLY valid JSON.",
+      FlashcardSchema,
     );
 
     // wipe & reinsert
@@ -422,6 +419,58 @@ export const listAllFlashcards = createServerFn({ method: "GET" })
   });
 
 // ---------- Chat ----------
+// ---------- RAG Transcript Helper ----------
+type TranscriptChunk = {
+  timestamp: string;
+  seconds: number;
+  text: string;
+};
+
+function buildTimestampedChunks(transcript: string, durationSeconds?: number | null): TranscriptChunk[] {
+  const words = transcript.split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+
+  const totalWords = words.length;
+  const totalSec = durationSeconds && durationSeconds > 0 ? durationSeconds : Math.ceil(totalWords / 2.5);
+  const chunkSize = 60; // words per chunk (~24s)
+  const chunks: TranscriptChunk[] = [];
+
+  for (let i = 0; i < totalWords; i += chunkSize) {
+    const chunkWords = words.slice(i, i + chunkSize);
+    const fraction = i / totalWords;
+    const sec = Math.floor(fraction * totalSec);
+    const m = Math.floor(sec / 60).toString().padStart(2, "0");
+    const s = Math.floor(sec % 60).toString().padStart(2, "0");
+    chunks.push({
+      timestamp: `${m}:${s}`,
+      seconds: sec,
+      text: chunkWords.join(" "),
+    });
+  }
+  return chunks;
+}
+
+function retrieveRAGChunks(chunks: TranscriptChunk[], query: string, topK = 5): TranscriptChunk[] {
+  if (!chunks.length) return [];
+  const queryTerms = query.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+  if (!queryTerms.length) return chunks.slice(0, topK);
+
+  const scored = chunks.map((c) => {
+    const textLower = c.text.toLowerCase();
+    let score = 0;
+    queryTerms.forEach((term) => {
+      if (textLower.includes(term)) score += 1;
+    });
+    return { chunk: c, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  const selected = scored.slice(0, topK).map((s) => s.chunk);
+  selected.sort((a, b) => a.seconds - b.seconds);
+  return selected;
+}
+
+// ---------- Chat with RAG Citations ----------
 const ChatInput = z.object({
   lecture_id: z.string().uuid(),
   message: z.string().min(1).max(2000),
@@ -431,16 +480,20 @@ export const chatWithLecture = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((v: unknown) => ChatInput.parse(v))
   .handler(async ({ data, context }) => {
-    const apiKey = process.env.LOVABLE_API_KEY;
-    if (!apiKey) throw new Error("Missing LOVABLE_API_KEY");
-
     const { data: lec } = await context.supabase
       .from("lectures")
-      .select("transcript, title")
+      .select("transcript, title, duration_seconds")
       .eq("id", data.lecture_id)
       .eq("user_id", context.userId)
       .maybeSingle();
     if (!lec?.transcript) throw new Error("Transcript not available yet.");
+
+    const chunks = buildTimestampedChunks(lec.transcript, lec.duration_seconds);
+    const relevantChunks = retrieveRAGChunks(chunks, data.message, 6);
+
+    const ragContext = relevantChunks
+      .map((c) => `[${c.timestamp}] ${c.text}`)
+      .join("\n\n");
 
     const { data: history } = await context.supabase
       .from("chat_messages")
@@ -456,26 +509,23 @@ export const chatWithLecture = createServerFn({ method: "POST" })
       content: data.message,
     });
 
+    const systemPrompt = `You are an AI lecture tutor helping a student understand "${lec.title}".
+Use the following retrieved transcript excerpts with timestamps to answer the student's question.
+IMPORTANT: Always cite the exact timestamp bracket like [MM:SS] when stating facts from the lecture.
+
+Retrieved Transcript Passages:
+${ragContext}
+
+If the question cannot be answered from the retrieved excerpts, give a concise answer based on general lecture context and note where relevant.`;
+
     const messages = [
-      {
-        role: "system",
-        content: `You are an AI tutor helping a student understand a lecture titled "${lec.title}". Answer clearly and simply, using easy terms. If the question is outside the lecture's scope, say so briefly. Lecture transcript:\n\n${lec.transcript.slice(0, 18000)}`,
-      },
+      // Note: systemPrompt is passed to geminiChat as config.systemInstruction.
+      // Do NOT include a role:"system" entry here — Gemini only accepts user/model.
       ...(history || []).map((h) => ({ role: h.role, content: h.content })),
       { role: "user", content: data.message },
     ];
 
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: "google/gemini-3.6-flash", messages }),
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`Chat failed (${res.status}): ${body.slice(0, 200)}`);
-    }
-    const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const reply = json.choices?.[0]?.message?.content?.trim() || "Sorry, no reply.";
+    const reply = await geminiChat(systemPrompt, messages);
 
     await context.supabase.from("chat_messages").insert({
       lecture_id: data.lecture_id,
@@ -484,6 +534,113 @@ export const chatWithLecture = createServerFn({ method: "POST" })
     });
 
     return { reply };
+  });
+
+// ---------- AI Exam Prep & Quiz Generator ----------
+type ExamPrepShape = {
+  title: string;
+  summary: string;
+  questions: Array<{
+    id: number;
+    question: string;
+    options: string[];
+    answerIndex: number;
+    explanation: string;
+    timestamp?: string;
+  }>;
+};
+
+export const generateExamPrep = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) => IdInput.parse(v))
+  .handler(async ({ data, context }) => {
+    const { data: lec } = await context.supabase
+      .from("lectures")
+      .select("transcript, title, duration_seconds")
+      .eq("id", data.id)
+      .eq("user_id", context.userId)
+      .maybeSingle();
+    const text = lec?.transcript ?? "";
+    if (text.trim().length < 20) throw new Error("Transcript not ready yet.");
+
+    const chunks = buildTimestampedChunks(text, lec?.duration_seconds);
+    const sampleChunks = chunks.slice(0, 10).map((c) => `[${c.timestamp}] ${c.text}`).join("\n");
+
+    const gen = await geminiChatJSON<ExamPrepShape>(
+      `Lecture Title: "${lec?.title}"\nTranscript Excerpts:\n${sampleChunks}\n\nGenerate an Exam Prep Quiz with 5 multiple choice practice exam questions. Include RAG explanation and cited timestamp [MM:SS] for each question. Return JSON: { "title": string, "summary": string, "questions": [ { "id": number, "question": string, "options": [string, string, string, string], "answerIndex": number (0-3), "explanation": string, "timestamp": string } ] }`,
+      "You generate exam preparation quizzes with detailed RAG explanations. Return ONLY valid JSON.",
+      ExamPrepSchema,
+    );
+
+    return gen;
+  });
+
+// ---------- Concept Mind Map Generator ----------
+type MindMapNode = {
+  label: string;
+  summary: string;
+  subtopics: string[];
+};
+
+type MindMapShape = {
+  topic: string;
+  nodes: MindMapNode[];
+};
+
+export const generateMindMap = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) => IdInput.parse(v))
+  .handler(async ({ data, context }) => {
+    const { data: lec } = await context.supabase
+      .from("lectures")
+      .select("transcript, title")
+      .eq("id", data.id)
+      .eq("user_id", context.userId)
+      .maybeSingle();
+    const text = lec?.transcript ?? "";
+    if (text.trim().length < 20) throw new Error("Transcript not ready yet.");
+
+    const gen = await geminiChatJSON<MindMapShape>(
+      `Lecture Title: "${lec?.title}"\nTranscript:\n${text.slice(0, 15000)}\n\nExtract a hierarchical Mind Map breakdown of 4-6 major themes/concepts discussed in this lecture. Return JSON: { "topic": string, "nodes": [ { "label": string, "summary": string, "subtopics": [string, string, string] } ] }`,
+      "You generate structured concept mind maps from educational content. Return ONLY valid JSON.",
+      MindMapSchema,
+    );
+
+    return gen;
+  });
+
+// ---------- Revision Plan Generator ----------
+type RevisionPlanShape = {
+  title: string;
+  total_days: number;
+  daily_plan: Array<{
+    day: number;
+    topic: string;
+    tasks: string[];
+    estimated_minutes: number;
+  }>;
+};
+
+export const generateRevisionPlan = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) => IdInput.parse(v))
+  .handler(async ({ data, context }) => {
+    const { data: lec } = await context.supabase
+      .from("lectures")
+      .select("transcript, title")
+      .eq("id", data.id)
+      .eq("user_id", context.userId)
+      .maybeSingle();
+    const text = lec?.transcript ?? "";
+    if (text.trim().length < 20) throw new Error("Transcript not ready yet.");
+
+    const gen = await geminiChatJSON<RevisionPlanShape>(
+      `Lecture Title: "${lec?.title}"\nTranscript:\n${text.slice(0, 20000)}\n\nGenerate a structured revision study plan. Return JSON: { "title": string, "total_days": number, "daily_plan": [ { "day": number, "topic": string, "tasks": [string, string, string], "estimated_minutes": number } ] }`,
+      "You generate structured revision study plans for students. Return ONLY valid JSON.",
+      RevisionPlanSchema,
+    );
+
+    return gen;
   });
 
 export const listChatMessages = createServerFn({ method: "POST" })
@@ -578,6 +735,56 @@ export const listCoursesForPicker = createServerFn({ method: "GET" })
     return data ?? [];
   });
 
+// ---------- AI provider health check ----------
+/**
+ * Lightweight probe: tries a minimal Gemini call to verify the key is valid
+ * and the API is reachable. Returns { ok: true } or { ok: false, reason: string }.
+ */
+export const checkAIProvider = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async () => {
+    const key = process.env.GEMINI_API_KEY?.trim();
+
+    if (!key) {
+      return { ok: false, reason: "GEMINI_API_KEY is not set. Add it to your .env file and restart the server." };
+    }
+
+    if (key.startsWith("AQ.")) {
+      return {
+        ok: false,
+        reason:
+          "The current GEMINI_API_KEY is a Lovable proxy key (AQ.…) with zero quota outside Lovable hosting. " +
+          "Replace it with a Google AI Studio key from https://aistudio.google.com/app/apikey",
+      };
+    }
+
+    try {
+      const { GoogleGenAI } = await import("@google/genai");
+      const probe = new GoogleGenAI({ apiKey: key });
+      const res = await probe.models.generateContent({
+        model: "gemini-2.0-flash",
+        contents: [{ role: "user", parts: [{ text: "1" }] }],
+        config: { maxOutputTokens: 1, temperature: 0 },
+      });
+      if (res.text !== undefined) return { ok: true as const, reason: null };
+      return { ok: false as const, reason: "Gemini responded but returned no text." };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("403") || msg.includes("blocked")) {
+        return {
+          ok: false as const,
+          reason:
+            "Gemini API key is blocked or the Generative Language API is not enabled. " +
+            "Enable it at console.cloud.google.com/apis/library/generativelanguage.googleapis.com",
+        };
+      }
+      if (msg.includes("429")) {
+        return { ok: false as const, reason: "Gemini API quota exhausted. Check your usage at ai.dev/rate-limit" };
+      }
+      return { ok: false as const, reason: `Gemini error: ${msg}` };
+    }
+  });
+
 // ---------- Dashboard stats ----------
 export const getDashboardStats = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -590,8 +797,12 @@ export const getDashboardStats = createServerFn({ method: "GET" })
 
     const { data: notes } = await context.supabase
       .from("lecture_notes")
-      .select("lecture_id")
-      .in("lecture_id", (lectures ?? []).map((l) => l.id).length ? (lectures ?? []).map((l) => l.id) : ["00000000-0000-0000-0000-000000000000"]);
+      .select("lecture_id");
+
+    const { data: flashcards } = await context.supabase
+      .from("flashcards")
+      .select("id, lecture_id, lectures!inner(user_id)")
+      .eq("lectures.user_id", context.userId);
 
     const totalSeconds = (lectures ?? []).reduce((a, l) => a + (l.duration_seconds ?? 0), 0);
     const ready = (lectures ?? []).filter((l) => l.transcript_status === "completed").length;
@@ -600,7 +811,104 @@ export const getDashboardStats = createServerFn({ method: "GET" })
       lectureCount: lectures?.length ?? 0,
       hours: +(totalSeconds / 3600).toFixed(1),
       notesCount: notes?.length ?? 0,
+      flashcardsCount: flashcards?.length ?? 0,
       readyCount: ready,
       recent: (lectures ?? []).slice(0, 5),
     };
   });
+
+// ---------- Analytics data ----------
+export const getAnalyticsData = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data: lectures } = await context.supabase
+      .from("lectures")
+      .select("id, title, duration_seconds, transcript_status, created_at, course_id")
+      .eq("user_id", context.userId)
+      .order("created_at", { ascending: true });
+
+    const { data: notes } = await context.supabase
+      .from("lecture_notes")
+      .select("lecture_id");
+
+    const { data: flashcards } = await context.supabase
+      .from("flashcards")
+      .select("id, difficulty, lecture_id, lectures!inner(user_id)")
+      .eq("lectures.user_id", context.userId);
+
+    const { data: courses } = await context.supabase
+      .from("courses")
+      .select("id, title")
+      .eq("user_id", context.userId);
+
+    const statusCounts = [
+      { name: "Completed", value: 0, color: "#10B981" },
+      { name: "Processing", value: 0, color: "#3B82F6" },
+      { name: "Pending", value: 0, color: "#F59E0B" },
+      { name: "Failed", value: 0, color: "#EF4444" },
+      { name: "Idle", value: 0, color: "#6B7280" },
+    ];
+
+    (lectures ?? []).forEach((l) => {
+      const s = (l.transcript_status || "idle").toLowerCase();
+      if (s === "completed") statusCounts[0].value++;
+      else if (s === "processing") statusCounts[1].value++;
+      else if (s === "pending") statusCounts[2].value++;
+      else if (s === "failed") statusCounts[3].value++;
+      else statusCounts[4].value++;
+    });
+
+    const courseMap: Record<string, { name: string; count: number }> = {};
+    (courses ?? []).forEach((c) => {
+      courseMap[c.id] = { name: c.title, count: 0 };
+    });
+    let uncategorized = 0;
+    (lectures ?? []).forEach((l) => {
+      if (l.course_id && courseMap[l.course_id]) {
+        courseMap[l.course_id].count++;
+      } else {
+        uncategorized++;
+      }
+    });
+
+    const courseDistribution = Object.values(courseMap).filter((c) => c.count > 0);
+    if (uncategorized > 0) {
+      courseDistribution.push({ name: "Uncategorized", count: uncategorized });
+    }
+
+    const difficultyBreakdown = [
+      { name: "Easy", count: 0, color: "#10B981" },
+      { name: "Medium", count: 0, color: "#F59E0B" },
+      { name: "Hard", count: 0, color: "#EF4444" },
+    ];
+    (flashcards ?? []).forEach((f) => {
+      const d = (f.difficulty || "medium").toLowerCase();
+      if (d === "easy") difficultyBreakdown[0].count++;
+      else if (d === "hard") difficultyBreakdown[2].count++;
+      else difficultyBreakdown[1].count++;
+    });
+
+    const totalSeconds = (lectures ?? []).reduce((a, l) => a + (l.duration_seconds ?? 0), 0);
+
+    const timelineMap: Record<string, { date: string; lectures: number; durationMinutes: number }> = {};
+    (lectures ?? []).forEach((l) => {
+      const dateStr = new Date(l.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+      if (!timelineMap[dateStr]) {
+        timelineMap[dateStr] = { date: dateStr, lectures: 0, durationMinutes: 0 };
+      }
+      timelineMap[dateStr].lectures += 1;
+      timelineMap[dateStr].durationMinutes += Math.round((l.duration_seconds ?? 0) / 60);
+    });
+
+    return {
+      totalLectures: lectures?.length ?? 0,
+      totalHours: +(totalSeconds / 3600).toFixed(1),
+      notesCount: notes?.length ?? 0,
+      flashcardsCount: flashcards?.length ?? 0,
+      statusCounts: statusCounts.filter((s) => s.value > 0),
+      courseDistribution,
+      difficultyBreakdown,
+      activityTimeline: Object.values(timelineMap).slice(-10),
+    };
+  });
+

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Plus, Loader2, Pencil, Trash2, Library } from "lucide-react";
+import { Plus, Loader2, Pencil, Trash2, Library, BookOpen, GraduationCap, Calendar, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -25,8 +25,8 @@ const coursesQ = () =>
 export const Route = createFileRoute("/_authenticated/courses")({
   head: () => ({
     meta: [
-      { title: "Courses — ALIP" },
-      { name: "description", content: "Organize your lectures by course." },
+      { title: "Courses & Semesters — AuraLearn AI" },
+      { name: "description", content: "Organize your lectures and course materials." },
     ],
   }),
   loader: ({ context }) => context.queryClient.ensureQueryData(coursesQ()),
@@ -57,6 +57,9 @@ function CoursesPage() {
   const [code, setCode] = useState("");
   const [description, setDescription] = useState("");
   const [color, setColor] = useState(COLORS[0]);
+  const [selectedSemester, setSelectedSemester] = useState("Fall 2026");
+
+  const semesters = ["Fall 2026", "Spring 2026", "Fall 2025"];
 
   const openNew = () => {
     setEditing(null);
@@ -99,45 +102,72 @@ function CoursesPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-8">
+      {/* ── Top Header & Semester Selector ── */}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Library</p>
-          <h1 className="mt-1.5 font-display text-3xl font-semibold tracking-tight">Courses</h1>
+          <div className="flex items-center gap-2">
+            <span className="badge-brand">
+              <GraduationCap className="h-3.5 w-3.5" />
+              Semester Context
+            </span>
+            <div className="flex gap-1.5 rounded-lg border border-border/50 bg-card/40 p-1">
+              {semesters.map((sem) => (
+                <button
+                  key={sem}
+                  onClick={() => setSelectedSemester(sem)}
+                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
+                    selectedSemester === sem
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {sem}
+                </button>
+              ))}
+            </div>
+          </div>
+          <h1 className="mt-3 font-display text-3xl font-bold tracking-tight">Courses & Syllabus</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Courses in {selectedSemester} form the permanent knowledge context for the AI Tutor.
+          </p>
         </div>
+
         <Button onClick={openNew} className="shadow-lg shadow-primary/20">
-          <Plus className="mr-2 h-4 w-4" /> New course
+          <Plus className="mr-2 h-4 w-4" /> New Course
         </Button>
       </div>
 
+      {/* ── Main List / Empty State ── */}
       {data.length === 0 ? (
-        <div className="mt-10 flex flex-col items-center justify-center rounded-2xl border border-border/60 bg-card/40 px-6 py-20 text-center">
+        <div className="mt-10 flex flex-col items-center justify-center rounded-2xl border border-border/60 bg-card/40 px-6 py-20 text-center backdrop-blur">
           <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-muted text-primary">
-            <Library className="h-5 w-5" />
+            <Library className="h-6 w-6" />
           </div>
-          <h3 className="text-base font-semibold">No courses yet</h3>
-          <p className="mx-auto mt-1.5 max-w-sm text-sm text-muted-foreground">
-            Create a course to group related lectures by subject or semester.
+          <h3 className="text-lg font-semibold">No courses in {selectedSemester}</h3>
+          <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
+            Add your subjects (e.g. CS229 Machine Learning) and upload course syllabi, textbooks, and past papers.
           </p>
-          <Button className="mt-5" size="sm" onClick={openNew}>
-            <Plus className="mr-2 h-3.5 w-3.5" /> Create your first course
+          <Button className="mt-6 shadow-md" size="sm" onClick={openNew}>
+            <Plus className="mr-2 h-4 w-4" /> Create Course Context
           </Button>
         </div>
       ) : (
-        <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           {data.map((c) => (
             <div
               key={c.id}
-              className="group relative overflow-hidden rounded-2xl border border-border/60 bg-card/40 p-5 transition-colors hover:bg-card/70"
+              className="feature-card group relative overflow-hidden rounded-2xl border border-border/60 bg-card/50 p-6 backdrop-blur transition-all hover:border-primary/40 hover:bg-card/80"
             >
-              <div className="absolute inset-x-0 top-0 h-1" style={{ background: c.color }} />
-              <div className="flex items-start justify-between gap-2">
+              <div className="absolute inset-x-0 top-0 h-1.5" style={{ background: c.color }} />
+              
+              <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   {c.code && (
-                    <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <span className="inline-block rounded-md bg-muted px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                       {c.code}
-                    </p>
+                    </span>
                   )}
-                  <h3 className="mt-1 truncate text-base font-semibold">{c.title}</h3>
+                  <h3 className="mt-2 truncate font-display text-lg font-bold tracking-tight">{c.title}</h3>
                 </div>
                 <div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                   <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => openEdit(c)}>
@@ -148,63 +178,78 @@ function CoursesPage() {
                     variant="ghost"
                     className="h-7 w-7 text-muted-foreground hover:text-destructive"
                     onClick={() => {
-                      if (confirm(`Delete "${c.title}"? Lectures inside will not be deleted.`)) del.mutate(c.id);
+                      if (confirm(`Delete "${c.title}"? Lectures will remain unassigned.`)) del.mutate(c.id);
                     }}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
               </div>
-              {c.description && (
-                <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{c.description}</p>
+
+              {c.description ? (
+                <p className="mt-2.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground">{c.description}</p>
+              ) : (
+                <p className="mt-2.5 text-xs italic text-muted-foreground/60">No description provided</p>
               )}
-              <p className="mt-4 text-xs text-muted-foreground">
-                {c.lectureCount} lecture{c.lectureCount === 1 ? "" : "s"}
-              </p>
+
+              <div className="mt-6 flex items-center justify-between border-t border-border/40 pt-4">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <BookOpen className="h-3.5 w-3.5 text-primary/70" />
+                  <span>{c.lectureCount} lecture{c.lectureCount === 1 ? "" : "s"}</span>
+                </div>
+
+                <div className="flex items-center gap-1 text-[11px] font-medium text-primary">
+                  <Sparkles className="h-3 w-3" />
+                  <span>Context Active</span>
+                </div>
+              </div>
             </div>
           ))}
         </div>
       )}
 
+      {/* ── Dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogTrigger asChild><span /></DialogTrigger>
-        <DialogContent>
+        <DialogContent className="glass-card sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{editing ? "Edit course" : "New course"}</DialogTitle>
+            <DialogTitle className="font-display text-xl font-bold">
+              {editing ? "Edit Course" : "Create New Course"}
+            </DialogTitle>
           </DialogHeader>
-          <div className="space-y-3">
+          <div className="space-y-4 py-2">
             <div>
-              <Label htmlFor="c-title">Title</Label>
-              <Input id="c-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Machine Learning" className="mt-1.5" />
+              <Label htmlFor="c-title" className="text-xs font-semibold text-muted-foreground">Course Name</Label>
+              <Input id="c-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Artificial Intelligence & Neural Networks" className="mt-1.5" />
             </div>
             <div>
-              <Label htmlFor="c-code">Code (optional)</Label>
-              <Input id="c-code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="CS229" className="mt-1.5" />
+              <Label htmlFor="c-code" className="text-xs font-semibold text-muted-foreground">Course Code</Label>
+              <Input id="c-code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g. CS-401" className="mt-1.5 font-mono text-xs" />
             </div>
             <div>
-              <Label htmlFor="c-desc">Description (optional)</Label>
-              <Textarea id="c-desc" value={description} onChange={(e) => setDescription(e.target.value)} className="mt-1.5" rows={3} />
+              <Label htmlFor="c-desc" className="text-xs font-semibold text-muted-foreground">Overview & Syllabus Context</Label>
+              <Textarea id="c-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Brief overview of topics covered this semester..." className="mt-1.5 text-xs" rows={3} />
             </div>
             <div>
-              <Label>Color</Label>
-              <div className="mt-2 flex flex-wrap gap-2">
+              <Label className="text-xs font-semibold text-muted-foreground">Theme Tag Color</Label>
+              <div className="mt-2.5 flex flex-wrap gap-2.5">
                 {COLORS.map((col) => (
                   <button
                     key={col}
                     type="button"
                     onClick={() => setColor(col)}
-                    className={`h-7 w-7 rounded-full border-2 transition ${color === col ? "border-foreground scale-110" : "border-transparent"}`}
+                    className={`h-7 w-7 rounded-full border-2 transition-transform ${color === col ? "border-foreground scale-110 shadow-md" : "border-transparent hover:scale-105"}`}
                     style={{ background: col }}
                   />
                 ))}
               </div>
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="mt-4">
             <Button variant="ghost" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button onClick={() => save.mutate()} disabled={!title.trim() || save.isPending}>
+            <Button onClick={() => save.mutate()} disabled={!title.trim() || save.isPending} className="shadow-md">
               {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {editing ? "Save" : "Create"}
+              {editing ? "Save Changes" : "Create Course"}
             </Button>
           </DialogFooter>
         </DialogContent>
