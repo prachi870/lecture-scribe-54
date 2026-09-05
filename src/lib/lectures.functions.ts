@@ -743,36 +743,58 @@ export const listCoursesForPicker = createServerFn({ method: "GET" })
 export const checkAIProvider = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async () => {
-    const key = process.env.GEMINI_API_KEY?.trim();
+    // Check Groq first (preferred provider — no daily quota limits)
+    const groqKey = process.env.GROQ_API_KEY?.trim();
+    if (groqKey) {
+      try {
+        const Groq = (await import("groq-sdk")).default;
+        const groq = new Groq({ apiKey: groqKey });
+        const r = await groq.chat.completions.create({
+          model: "qwen/qwen3.8-27b",
+          messages: [{ role: "user", content: "1" }],
+          max_tokens: 10,
+        });
+        if (r.choices[0]?.message?.content !== undefined) {
+          return { ok: true as const, reason: null, provider: "Groq (qwen3.8-27b + Whisper)" };
+        }
+        return { ok: false as const, reason: "Groq responded but returned no content.", provider: "Groq" };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("401") || msg.includes("invalid_api_key")) {
+          return { ok: false as const, reason: "GROQ_API_KEY is invalid. Get a key at console.groq.com", provider: "Groq" };
+        }
+        if (msg.includes("429")) {
+          return { ok: false as const, reason: "Groq rate limit hit (resets in minutes — much better than Gemini's daily limit).", provider: "Groq" };
+        }
+        return { ok: false as const, reason: `Groq error: ${msg.substring(0, 100)}`, provider: "Groq" };
+      }
+    }
 
-    if (!key) {
-      return { ok: false, reason: "GEMINI_API_KEY is not set. Add it to your .env file and restart the server." };
+    // Fallback: check Gemini
+    const geminiKey = process.env.GEMINI_API_KEY?.trim();
+    if (!geminiKey) {
+      return { ok: false as const, reason: "No API key set. Add GROQ_API_KEY (recommended) or GEMINI_API_KEY to .env", provider: "none" };
     }
 
     try {
       const { GoogleGenAI } = await import("@google/genai");
-      const probe = new GoogleGenAI({ apiKey: key });
+      const probe = new GoogleGenAI({ apiKey: geminiKey });
       const res = await probe.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents: [{ role: "user", parts: [{ text: "Say: OK" }] }],
+        model: "gemini-3.5-flash",
+        contents: [{ role: "user", parts: [{ text: "1" }] }],
         config: { maxOutputTokens: 50, temperature: 0 },
       });
-      if (res.text !== undefined && res.text !== null) return { ok: true as const, reason: null };
-      return { ok: false as const, reason: "Gemini responded but returned no text." };
+      if (res.text !== undefined && res.text !== null) return { ok: true as const, reason: null, provider: "Gemini (3.5-flash)" };
+      return { ok: false as const, reason: "Gemini responded but returned no text.", provider: "Gemini" };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes("403") || msg.includes("blocked")) {
-        return {
-          ok: false as const,
-          reason:
-            "Gemini API key is blocked or the Generative Language API is not enabled. " +
-            "Enable it at console.cloud.google.com/apis/library/generativelanguage.googleapis.com",
-        };
+        return { ok: false as const, reason: "Gemini API key blocked. Set GROQ_API_KEY in .env for unlimited usage.", provider: "Gemini" };
       }
       if (msg.includes("429")) {
-        return { ok: false as const, reason: "Gemini API quota exhausted. Check your usage at ai.dev/rate-limit" };
+        return { ok: false as const, reason: "Gemini quota exhausted (resets at 1:30 AM IST). Add GROQ_API_KEY for no daily limits.", provider: "Gemini" };
       }
-      return { ok: false as const, reason: `Gemini error: ${msg}` };
+      return { ok: false as const, reason: `Gemini error: ${msg.substring(0, 100)}`, provider: "Gemini" };
     }
   });
 

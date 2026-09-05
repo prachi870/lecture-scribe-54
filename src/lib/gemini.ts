@@ -1,309 +1,297 @@
+/**
+ * AI Provider — Groq (primary) + Gemini (fallback)
+ *
+ * Groq:
+ *   - Chat / Notes / Flashcards / Exam / MindMap / Revision / Chat-RAG
+ *     → qwen/qwen3.8-27b  (OpenAI-compatible, ~14,400 req/day free)
+ *   - Audio Transcription
+ *     → whisper-large-v3-turbo  (purpose-built STT, 20 audio files/hour free)
+ *
+ * Gemini (fallback when GROQ_API_KEY is absent):
+ *   - gemini-3.5-flash / gemini-3.6-flash  (20–100 req/day free)
+ *
+ * Priority:  GROQ_API_KEY > GEMINI_API_KEY
+ */
+
+import Groq from "groq-sdk";
 import { GoogleGenAI, Type } from "@google/genai";
 
-// ── Lazy AI client ──────────────────────────────────────────────────────────
-// Initialization is deferred to the first actual call.
-// This prevents a module-level crash when GEMINI_API_KEY is missing or invalid,
-// which would otherwise kill all 19 server functions at startup.
-let _ai: GoogleGenAI | null = null;
+// ── Provider instances (lazy) ─────────────────────────────────────────────
+let _groq: Groq | null = null;
+let _gemini: GoogleGenAI | null = null;
 
-/**
- * Returns a validated GoogleGenAI instance, or throws a clear user-facing
- * error if the key is absent, obviously malformed, or blocked by Google.
- */
-function getAI(): GoogleGenAI {
-  if (_ai) return _ai;
-
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
-
-  if (!apiKey) {
-    throw new Error(
-      "AI_PROVIDER_NOT_CONFIGURED: No GEMINI_API_KEY found. " +
-      "Add a valid key from https://aistudio.google.com/app/apikey to the .env file and restart the server."
-    );
-  }
-
-  // The Lovable-issued AQ. proxy keys previously had quota limit:0.
-  // Newer AQ. keys from Google AI Studio are valid — do not block them.
-  _ai = new GoogleGenAI({ apiKey });
-  return _ai;
+function getGroq(): Groq {
+  if (_groq) return _groq;
+  const key = process.env.GROQ_API_KEY?.trim();
+  if (!key) throw new Error("NO_GROQ");
+  _groq = new Groq({ apiKey: key });
+  return _groq;
 }
 
-const MODEL = "gemini-3.6-flash";
+function getGemini(): GoogleGenAI {
+  if (_gemini) return _gemini;
+  const key = process.env.GEMINI_API_KEY?.trim();
+  if (!key) throw new Error("AI_PROVIDER_NOT_CONFIGURED: Set GROQ_API_KEY or GEMINI_API_KEY in .env");
+  _gemini = new GoogleGenAI({ apiKey: key });
+  return _gemini;
+}
 
-/**
- * Fallback model list — tried in order when the primary hits daily quota (429).
- * All confirmed working with this key. Rotates automatically so the app keeps
- * running even after one model's free-tier RPD is exhausted.
- */
-const MODEL_FALLBACKS = [
-  "gemini-3.6-flash",
-  "gemini-3.5-flash",
-  "gemini-3.8-flash",
-  "gemini-3.5-flash-lite",
-];
+// Gemini model rotation (fallback when Groq unavailable)
+const GEMINI_MODELS = ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.5-flash-lite"];
+const GROQ_CHAT_MODEL = "qwen/qwen3.8-27b";
+const GROQ_TRANSCRIBE_MODEL = "whisper-large-v3-turbo";
 
-/**
- * Retry wrapper with model rotation on 429 quota errors.
- * - 429 from one model → immediately tries the next model in the fallback list
- * - 403 (key blocked) → non-retryable, throws immediately with a clear message
- * - 5xx / timeout / ECONNRESET → exponential backoff within the same model
- */
-async function withRetry<T>(
-  fn: (model: string) => Promise<T>,
-  maxRetries = 2,
+// ── JSON structured output via Groq ──────────────────────────────────────
+async function groqJSON<T>(prompt: string, systemPrompt: string): Promise<T> {
+  const completion = await getGroq().chat.completions.create({
+    model: GROQ_CHAT_MODEL,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: prompt },
+    ],
+    max_tokens: 900,   // Groq free tier: 1000 output tokens/min limit — stay under safely
+    temperature: 0.7,
+    response_format: { type: "json_object" },
+  });
+  const text = completion.choices[0]?.message?.content?.trim() ?? "";
+  if (!text) throw new Error("Empty Groq response");
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const m = text.match(/\{[\s\S]*\}/);
+    if (m) return JSON.parse(m[0]) as T;
+    throw new Error("Groq response was not valid JSON");
+  }
+}
+
+// ── JSON structured output via Gemini (fallback) ──────────────────────────
+async function geminiJSONWithRotation<T>(
+  prompt: string,
+  systemPrompt: string,
+  schema: Record<string, unknown>,
 ): Promise<T> {
-  let lastError: unknown;
-
-  for (const model of MODEL_FALLBACKS) {
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        return await fn(model);
-      } catch (err) {
-        lastError = err;
-        const msg = err instanceof Error ? err.message : "";
-
-        // Non-retryable: key blocked / API not enabled
-        if (msg.includes("403") || msg.includes("API_KEY_INVALID") || msg.includes("blocked")) {
-          throw new Error(
-            "AI_PROVIDER_ERROR: Gemini API key is blocked or the Generative Language API is not " +
-            "enabled on this Google Cloud project. Enable it at " +
-            "https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com " +
-            "or create a fresh key at https://aistudio.google.com/app/apikey"
-          );
-        }
-
-        // Non-retryable: missing key
-        if (msg.startsWith("AI_PROVIDER_NOT_CONFIGURED")) throw err;
-
-        // 429 quota exhausted — break inner loop, try next model immediately
-        if (msg.includes("429")) {
-          console.warn(`[Gemini] ${model} quota exhausted — trying next model`);
-          break;
-        }
-
-        // Transient server errors — backoff and retry same model
-        const isTransient =
-          err instanceof Error &&
-          (msg.includes("503") ||
-            msg.includes("502") ||
-            msg.includes("timeout") ||
-            msg.includes("ECONNRESET"));
-        if (!isTransient || attempt === maxRetries) {
-          if (attempt === maxRetries) break; // try next model
-          throw err;
-        }
-        const delay = Math.pow(2, attempt) * 1000;
-        await new Promise((r) => setTimeout(r, delay));
+  let lastErr: unknown;
+  for (const model of GEMINI_MODELS) {
+    try {
+      const response = await getGemini().models.generateContent({
+        model,
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: {
+          systemInstruction: systemPrompt,
+          responseMimeType: "application/json",
+          responseSchema: schema as never,
+          temperature: 0.7,
+          maxOutputTokens: 8192,
+        },
+      });
+      const content = response.text?.trim() ?? "";
+      if (!content) throw new Error("Empty Gemini response");
+      try { return JSON.parse(content) as T; }
+      catch {
+        const m = content.match(/\{[\s\S]*\}/);
+        if (m) return JSON.parse(m[0]) as T;
+        throw new Error("Gemini response was not valid JSON");
       }
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("429")) { console.warn(`[Gemini] ${model} quota hit, trying next`); continue; }
+      if (msg.includes("403") || msg.includes("blocked")) {
+        throw new Error("Gemini API key blocked. Set GROQ_API_KEY in .env for unlimited usage.");
+      }
+      throw err;
     }
   }
-
-  // All models exhausted
-  throw new Error(
-    "AI_QUOTA_EXHAUSTED: All Gemini models have reached their daily free-tier quota. " +
-    "Quota resets at midnight Pacific Time (1:30 AM IST). " +
-    "To use the app without limits, create a new Google account at gmail.com and " +
-    "get a fresh API key from https://aistudio.google.com/app/apikey"
-  );
+  throw new Error("All Gemini models quota exhausted. Add GROQ_API_KEY to .env for unlimited usage.");
 }
 
-/**
- * Call Gemini with JSON schema response.
- * Replaces callLovableChatJSON.
- */
+// ── Chat via Groq ─────────────────────────────────────────────────────────
+async function groqChat(
+  systemPrompt: string,
+  messages: Array<{ role: string; content: string }>,
+): Promise<string> {
+  const msgs: Groq.Chat.ChatCompletionMessageParam[] = [
+    { role: "system", content: systemPrompt },
+    ...messages
+      .filter((m) => m.role !== "system")
+      .map((m) => ({
+        role: (m.role === "assistant" ? "assistant" : "user") as "user" | "assistant",
+        content: m.content,
+      })),
+  ];
+  const completion = await getGroq().chat.completions.create({
+    model: GROQ_CHAT_MODEL,
+    messages: msgs,
+    max_tokens: 900,   // Groq free tier: 1000 output tokens/min — stay safe
+    temperature: 0.7,
+  });
+  const text = completion.choices[0]?.message?.content?.trim() ?? "";
+  if (!text) throw new Error("Empty Groq chat response");
+  return text;
+}
+
+// ── Chat via Gemini (fallback) ────────────────────────────────────────────
+async function geminiChatInternal(
+  systemPrompt: string,
+  messages: Array<{ role: string; content: string }>,
+): Promise<string> {
+  let lastErr: unknown;
+  for (const model of GEMINI_MODELS) {
+    try {
+      const contents = messages
+        .filter((m) => m.role !== "system")
+        .map((m) => ({
+          role: (m.role === "assistant" ? "model" : "user") as "user" | "model",
+          parts: [{ text: m.content }],
+        }));
+      const response = await getGemini().models.generateContent({
+        model,
+        contents,
+        config: { systemInstruction: systemPrompt, temperature: 0.7, maxOutputTokens: 4096 },
+      });
+      const text = response.text?.trim() ?? "";
+      if (!text) throw new Error("Empty Gemini response");
+      return text;
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("429")) { continue; }
+      throw err;
+    }
+  }
+  throw lastErr as Error;
+}
+
+// ── Transcription via Groq Whisper ────────────────────────────────────────
+async function groqTranscribe(audioBlob: Blob, fileName: string): Promise<string> {
+  // Groq Whisper expects a File object with a name
+  const ext = fileName.split(".").pop() || "webm";
+  const file = new File([audioBlob], `audio.${ext}`, { type: audioBlob.type || "audio/webm" });
+  const transcription = await getGroq().audio.transcriptions.create({
+    file,
+    model: GROQ_TRANSCRIBE_MODEL,
+    response_format: "text",
+  });
+  const text = (transcription as unknown as string).trim();
+  if (!text) throw new Error("Empty Whisper transcription");
+  return text;
+}
+
+// ── Transcription via Gemini (fallback) ───────────────────────────────────
+const MAX_AUDIO_BYTES = 18 * 1024 * 1024;
+
+async function geminiTranscribeWithRotation(audioBlob: Blob, fileName: string): Promise<string> {
+  const transcribeChunk = async (chunk: Blob, model: string, segLabel: string): Promise<string> => {
+    const buf = await chunk.arrayBuffer();
+    const base64 = Buffer.from(buf).toString("base64");
+    const response = await getGemini().models.generateContent({
+      model,
+      contents: [{
+        role: "user",
+        parts: [
+          { text: `Transcribe this audio${segLabel} accurately. Return only the transcribed text.` },
+          { inlineData: { mimeType: chunk.type || "audio/webm", data: base64 } },
+        ],
+      }],
+      config: { temperature: 0.1, maxOutputTokens: 32768 },
+    });
+    return response.text?.trim() ?? "";
+  };
+
+  let lastErr: unknown;
+  for (const model of GEMINI_MODELS) {
+    try {
+      if (audioBlob.size <= MAX_AUDIO_BYTES) {
+        const text = await transcribeChunk(audioBlob, model, "");
+        if (text) return text;
+        throw new Error("Empty transcription");
+      }
+      // Chunk large files
+      const chunks: Blob[] = [];
+      for (let offset = 0; offset < audioBlob.size; offset += MAX_AUDIO_BYTES) {
+        chunks.push(audioBlob.slice(offset, Math.min(offset + MAX_AUDIO_BYTES, audioBlob.size)));
+      }
+      const parts: string[] = [];
+      for (let i = 0; i < chunks.length; i++) {
+        const t = await transcribeChunk(chunks[i], model, ` (segment ${i + 1}/${chunks.length})`);
+        if (t) parts.push(t);
+      }
+      if (!parts.length) throw new Error("No transcription segments");
+      return parts.join("\n\n");
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : "";
+      if (msg.includes("429")) { continue; }
+      throw err;
+    }
+  }
+  throw lastErr as Error;
+}
+
+// ── Public API ────────────────────────────────────────────────────────────
+// These are the functions called by lectures.functions.ts.
+// They automatically use Groq if available, falling back to Gemini.
+
 export async function geminiChatJSON<T>(
   prompt: string,
   systemPrompt: string,
   schema: Record<string, unknown>,
 ): Promise<T> {
-  return withRetry(async (model) => {
-    const response = await getAI().models.generateContent({
-      model,
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: {
-        systemInstruction: systemPrompt,
-        responseMimeType: "application/json",
-        responseSchema: schema as never,
-        temperature: 0.7,
-        maxOutputTokens: 8192,
-      },
-    });
-
-    const content = response.text?.trim() ?? "";
-    if (!content) throw new Error("Empty Gemini response");
-
-    try {
-      return JSON.parse(content) as T;
-    } catch {
-      const match = content.match(/\{[\s\S]*\}/);
-      if (match) return JSON.parse(match[0]) as T;
-      throw new Error("Gemini response was not valid JSON");
+  const groqKey = process.env.GROQ_API_KEY?.trim();
+  if (groqKey) {
+    try { return await groqJSON<T>(prompt, systemPrompt); }
+    catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg === "NO_GROQ") return geminiJSONWithRotation<T>(prompt, systemPrompt, schema);
+      // Groq rate limit → fall through to Gemini
+      if (msg.includes("429") || msg.includes("rate_limit")) {
+        console.warn("[Groq] rate limit hit, falling back to Gemini");
+        return geminiJSONWithRotation<T>(prompt, systemPrompt, schema);
+      }
+      throw err;
     }
-  });
+  }
+  return geminiJSONWithRotation<T>(prompt, systemPrompt, schema);
 }
 
-/**
- * Call Gemini for conversational chat (non-JSON).
- * Replaces the direct chat API call in chatWithLecture.
- *
- * Role mapping: Gemini only accepts "user" and "model" in the contents array.
- * - "assistant" (stored in DB)  → "model"
- * - "system"                    → stripped (already handled via config.systemInstruction)
- * - anything else               → "user"
- */
 export async function geminiChat(
   systemPrompt: string,
   messages: Array<{ role: string; content: string }>,
 ): Promise<string> {
-  return withRetry(async (model) => {
-    const contents = messages
-      .filter((m) => m.role !== "system")
-      .map((m) => ({
-        role: (m.role === "assistant" ? "model" : "user") as "user" | "model",
-        parts: [{ text: m.content }],
-      }));
-
-    const response = await getAI().models.generateContent({
-      model,
-      contents,
-      config: {
-        systemInstruction: systemPrompt,
-        temperature: 0.7,
-        maxOutputTokens: 4096,
-      },
-    });
-
-    const content = response.text?.trim() ?? "";
-    if (!content) throw new Error("Empty Gemini response");
-    return content;
-  });
-}
-
-/**
- * Transcribe audio using Gemini's audio transcription.
- *
- * ARCHITECTURE NOTE:
- * Gemini 2.0 Flash supports audio input natively (20MB file limit, ~180 min max).
- * For long lecture recordings, we chunk the audio into segments and transcribe
- * each independently, then concatenate. This is a pragmatic approach that avoids
- * the 20MB file size limit while keeping a single API provider.
- *
- * For production use with very long lectures (>60 min), a dedicated STT model
- * (e.g., OpenAI Whisper, Google Speech-to-Text) would be more appropriate:
- *   - Lower cost per minute
- *   - Better word error rate on speech
- *   - Speaker diarization support
- *   - Per-word timestamps
- *   - Streaming capability
- *
- * The current implementation uses Gemini 2.0 Flash because:
- *   1. It's already configured with the user's GEMINI_API_KEY
- *   2. It eliminates the need for a second API key/service
- *   3. It handles the typical lecture length (5-30 min) well
- *   4. Chunking provides a fallback for longer files
- */
-const MAX_AUDIO_BYTES = 18 * 1024 * 1024; // 18MB safety margin under 20MB limit
-
-export async function geminiTranscribe(
-  audioBlob: Blob,
-  fileName: string,
-): Promise<string> {
-  return withRetry(async (model) => {
-    // If audio is small enough, transcribe in one shot
-    if (audioBlob.size <= MAX_AUDIO_BYTES) {
-      const base64 = await blobToBase64(audioBlob);
-
-      const response = await getAI().models.generateContent({
-        model,
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { text: "Transcribe this audio file accurately. Return only the transcribed text, no additional formatting or commentary." },
-              {
-                inlineData: {
-                  mimeType: audioBlob.type || "audio/webm",
-                  data: base64,
-                },
-              },
-            ],
-          },
-        ],
-        config: {
-          temperature: 0.1,
-          maxOutputTokens: 32768,
-        },
-      });
-
-      const text = response.text?.trim() ?? "";
-      if (!text) throw new Error("Empty transcription response from Gemini");
-      return text;
+  const groqKey = process.env.GROQ_API_KEY?.trim();
+  if (groqKey) {
+    try { return await groqChat(systemPrompt, messages); }
+    catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg === "NO_GROQ") return geminiChatInternal(systemPrompt, messages);
+      if (msg.includes("429") || msg.includes("rate_limit")) {
+        return geminiChatInternal(systemPrompt, messages);
+      }
+      throw err;
     }
-
-    // For large files, chunk and transcribe sequentially
-    const chunks = await chunkAudioBlob(audioBlob, audioBlob.type || "audio/webm");
-    const transcripts: string[] = [];
-
-    for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i];
-      const base64 = await blobToBase64(chunk);
-
-      const response = await getAI().models.generateContent({
-        model,
-        contents: [
-          {
-            role: "user",
-            parts: [
-              { text: `Transcribe this audio segment (${i + 1} of ${chunks.length}) accurately. Return only the transcribed text.` },
-              {
-                inlineData: {
-                  mimeType: chunk.type || "audio/webm",
-                  data: base64,
-                },
-              },
-            ],
-          },
-        ],
-        config: {
-          temperature: 0.1,
-          maxOutputTokens: 32768,
-        },
-      });
-
-      const text = response.text?.trim() ?? "";
-      if (text) transcripts.push(text);
-    }
-
-    if (!transcripts.length) throw new Error("No transcription segments returned");
-    return transcripts.join("\n\n");
-  });
-}
-
-/**
- * Split a large audio Blob into smaller chunks under MAX_AUDIO_BYTES each.
- * Uses the Web Audio API to decode and re-encode segments.
- */
-async function chunkAudioBlob(blob: Blob, mimeType: string): Promise<Blob[]> {
-  // Fallback: split by byte size if Web Audio API is not available
-  const chunkSize = MAX_AUDIO_BYTES;
-  const chunks: Blob[] = [];
-
-  for (let offset = 0; offset < blob.size; offset += chunkSize) {
-    const end = Math.min(offset + chunkSize, blob.size);
-    chunks.push(blob.slice(offset, end));
   }
-
-  return chunks;
+  return geminiChatInternal(systemPrompt, messages);
 }
 
-async function blobToBase64(blob: Blob): Promise<string> {
-  // Use arrayBuffer() — works in Node.js, Cloudflare Workers, and the browser.
-  // FileReader is browser-only and would throw ReferenceError in server contexts.
-  const buf = await blob.arrayBuffer();
-  return Buffer.from(buf).toString("base64");
+export async function geminiTranscribe(audioBlob: Blob, fileName: string): Promise<string> {
+  const groqKey = process.env.GROQ_API_KEY?.trim();
+  if (groqKey) {
+    try { return await groqTranscribe(audioBlob, fileName); }
+    catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg === "NO_GROQ") return geminiTranscribeWithRotation(audioBlob, fileName);
+      if (msg.includes("429") || msg.includes("rate_limit")) {
+        console.warn("[Groq Whisper] rate limit, falling back to Gemini");
+        return geminiTranscribeWithRotation(audioBlob, fileName);
+      }
+      throw err;
+    }
+  }
+  return geminiTranscribeWithRotation(audioBlob, fileName);
 }
 
-// JSON Schemas for AI features
+// ── JSON Schemas (unchanged — used by lectures.functions.ts) ─────────────
+
 export const NotesSchema = {
   type: Type.OBJECT,
   properties: {
@@ -340,10 +328,7 @@ export const FlashcardSchema = {
         properties: {
           question: { type: Type.STRING },
           answer: { type: Type.STRING },
-          difficulty: {
-            type: Type.STRING,
-            enum: ["easy", "medium", "hard"],
-          },
+          difficulty: { type: Type.STRING, enum: ["easy", "medium", "hard"] },
         },
         required: ["question", "answer", "difficulty"],
       },
@@ -364,10 +349,7 @@ export const ExamPrepSchema = {
         properties: {
           id: { type: Type.INTEGER },
           question: { type: Type.STRING },
-          options: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING },
-          },
+          options: { type: Type.ARRAY, items: { type: Type.STRING } },
           answerIndex: { type: Type.INTEGER, description: "0-3" },
           explanation: { type: Type.STRING },
           timestamp: { type: Type.STRING },
@@ -390,10 +372,7 @@ export const MindMapSchema = {
         properties: {
           label: { type: Type.STRING },
           summary: { type: Type.STRING },
-          subtopics: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING },
-          },
+          subtopics: { type: Type.ARRAY, items: { type: Type.STRING } },
         },
         required: ["label", "summary", "subtopics"],
       },
@@ -414,10 +393,7 @@ export const RevisionPlanSchema = {
         properties: {
           day: { type: Type.INTEGER },
           topic: { type: Type.STRING },
-          tasks: {
-            type: Type.ARRAY,
-            items: { type: Type.STRING },
-          },
+          tasks: { type: Type.ARRAY, items: { type: Type.STRING } },
           estimated_minutes: { type: Type.INTEGER },
         },
         required: ["day", "topic", "tasks", "estimated_minutes"],
