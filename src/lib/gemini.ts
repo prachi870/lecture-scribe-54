@@ -31,45 +31,80 @@ function getAI(): GoogleGenAI {
 const MODEL = "gemini-3.6-flash";
 
 /**
- * Retry wrapper with exponential backoff for transient failures.
- * 403 (key blocked / API not enabled) is NOT retried — it's a config error.
- * 429 (quota exceeded) IS retried — it may resolve after a brief wait.
+ * Fallback model list — tried in order when the primary hits daily quota (429).
+ * All confirmed working with this key. Rotates automatically so the app keeps
+ * running even after one model's free-tier RPD is exhausted.
  */
-async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+const MODEL_FALLBACKS = [
+  "gemini-3.6-flash",
+  "gemini-3.5-flash",
+  "gemini-3.8-flash",
+  "gemini-3.5-flash-lite",
+];
+
+/**
+ * Retry wrapper with model rotation on 429 quota errors.
+ * - 429 from one model → immediately tries the next model in the fallback list
+ * - 403 (key blocked) → non-retryable, throws immediately with a clear message
+ * - 5xx / timeout / ECONNRESET → exponential backoff within the same model
+ */
+async function withRetry<T>(
+  fn: (model: string) => Promise<T>,
+  maxRetries = 2,
+): Promise<T> {
   let lastError: unknown;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastError = err;
-      const msg = err instanceof Error ? err.message : "";
 
-      // Non-retryable: configuration errors — fail immediately with a clean message
-      if (msg.includes("403") || msg.includes("API_KEY_INVALID") || msg.includes("blocked")) {
-        throw new Error(
-          "AI_PROVIDER_ERROR: Gemini API key is blocked or the Generative Language API is not " +
-          "enabled on this Google Cloud project. Enable it at " +
-          "https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com " +
-          "or create a fresh key at https://aistudio.google.com/app/apikey"
-        );
+  for (const model of MODEL_FALLBACKS) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await fn(model);
+      } catch (err) {
+        lastError = err;
+        const msg = err instanceof Error ? err.message : "";
+
+        // Non-retryable: key blocked / API not enabled
+        if (msg.includes("403") || msg.includes("API_KEY_INVALID") || msg.includes("blocked")) {
+          throw new Error(
+            "AI_PROVIDER_ERROR: Gemini API key is blocked or the Generative Language API is not " +
+            "enabled on this Google Cloud project. Enable it at " +
+            "https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com " +
+            "or create a fresh key at https://aistudio.google.com/app/apikey"
+          );
+        }
+
+        // Non-retryable: missing key
+        if (msg.startsWith("AI_PROVIDER_NOT_CONFIGURED")) throw err;
+
+        // 429 quota exhausted — break inner loop, try next model immediately
+        if (msg.includes("429")) {
+          console.warn(`[Gemini] ${model} quota exhausted — trying next model`);
+          break;
+        }
+
+        // Transient server errors — backoff and retry same model
+        const isTransient =
+          err instanceof Error &&
+          (msg.includes("503") ||
+            msg.includes("502") ||
+            msg.includes("timeout") ||
+            msg.includes("ECONNRESET"));
+        if (!isTransient || attempt === maxRetries) {
+          if (attempt === maxRetries) break; // try next model
+          throw err;
+        }
+        const delay = Math.pow(2, attempt) * 1000;
+        await new Promise((r) => setTimeout(r, delay));
       }
-
-      // Non-retryable: missing / invalid key caught by getAI()
-      if (msg.startsWith("AI_PROVIDER_NOT_CONFIGURED")) throw err;
-
-      const isTransient =
-        err instanceof Error &&
-        (msg.includes("503") ||
-          msg.includes("502") ||
-          msg.includes("429") ||
-          msg.includes("timeout") ||
-          msg.includes("ECONNRESET"));
-      if (!isTransient || attempt === maxRetries) throw err;
-      const delay = Math.pow(2, attempt) * 1000;
-      await new Promise((r) => setTimeout(r, delay));
     }
   }
-  throw lastError;
+
+  // All models exhausted
+  throw new Error(
+    "AI_QUOTA_EXHAUSTED: All Gemini models have reached their daily free-tier quota. " +
+    "Quota resets at midnight Pacific Time (1:30 AM IST). " +
+    "To use the app without limits, create a new Google account at gmail.com and " +
+    "get a fresh API key from https://aistudio.google.com/app/apikey"
+  );
 }
 
 /**
@@ -81,9 +116,9 @@ export async function geminiChatJSON<T>(
   systemPrompt: string,
   schema: Record<string, unknown>,
 ): Promise<T> {
-  return withRetry(async () => {
+  return withRetry(async (model) => {
     const response = await getAI().models.generateContent({
-      model: MODEL,
+      model,
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       config: {
         systemInstruction: systemPrompt,
@@ -120,7 +155,7 @@ export async function geminiChat(
   systemPrompt: string,
   messages: Array<{ role: string; content: string }>,
 ): Promise<string> {
-  return withRetry(async () => {
+  return withRetry(async (model) => {
     const contents = messages
       .filter((m) => m.role !== "system")
       .map((m) => ({
@@ -129,7 +164,7 @@ export async function geminiChat(
       }));
 
     const response = await getAI().models.generateContent({
-      model: MODEL,
+      model,
       contents,
       config: {
         systemInstruction: systemPrompt,
@@ -173,13 +208,13 @@ export async function geminiTranscribe(
   audioBlob: Blob,
   fileName: string,
 ): Promise<string> {
-  return withRetry(async () => {
+  return withRetry(async (model) => {
     // If audio is small enough, transcribe in one shot
     if (audioBlob.size <= MAX_AUDIO_BYTES) {
       const base64 = await blobToBase64(audioBlob);
 
       const response = await getAI().models.generateContent({
-        model: MODEL,
+        model,
         contents: [
           {
             role: "user",
@@ -214,7 +249,7 @@ export async function geminiTranscribe(
       const base64 = await blobToBase64(chunk);
 
       const response = await getAI().models.generateContent({
-        model: MODEL,
+        model,
         contents: [
           {
             role: "user",
