@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { Suspense, useRef, useState } from "react";
 import { createFileRoute, Link, useNavigate, redirect } from "@tanstack/react-router";
 import { queryOptions, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -22,6 +22,7 @@ import {
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StatusBadge } from "@/components/lectures/status-badge";
 import { TranscriptView } from "@/components/lectures/transcript-view";
@@ -71,8 +72,37 @@ export const Route = createFileRoute("/_authenticated/lectures/$id")({
     }
     return context.queryClient.ensureQueryData(lectureQuery(params.id));
   },
-  component: LectureDetail,
+  component: () => (
+    <Suspense fallback={<LectureDetailSkeleton />}>
+      <LectureDetail />
+    </Suspense>
+  ),
 });
+
+function LectureDetailSkeleton() {
+  return (
+    <div className="mx-auto max-w-4xl px-6 py-8">
+      <Skeleton className="h-3.5 w-24" />
+      <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-80" />
+          <div className="flex gap-3">
+            <Skeleton className="h-5 w-20 rounded-full" />
+            <Skeleton className="h-5 w-24" />
+          </div>
+        </div>
+        <Skeleton className="h-8 w-20" />
+      </div>
+      <Skeleton className="mt-6 h-14 w-full rounded-2xl" />
+      <div className="mt-6">
+        <div className="flex gap-2 mb-4">
+          {Array.from({ length: 7 }).map((_, i) => <Skeleton key={i} className="h-9 flex-1 rounded-md" />)}
+        </div>
+        <Skeleton className="h-64 w-full rounded-2xl" />
+      </div>
+    </div>
+  );
+}
 
 function LectureDetail() {
   const { id } = Route.useParams();

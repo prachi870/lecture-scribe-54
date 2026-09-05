@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { Plus, Loader2, Pencil, Trash2, Library, BookOpen, GraduationCap, Calendar, Sparkles } from "lucide-react";
+import { Plus, Loader2, Pencil, Trash2, Library, BookOpen, GraduationCap, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -198,10 +198,15 @@ function CoursesPage() {
                   <span>{c.lectureCount} lecture{c.lectureCount === 1 ? "" : "s"}</span>
                 </div>
 
-                <div className="flex items-center gap-1 text-[11px] font-medium text-primary">
+                <Link
+                  to="/courses/$id"
+                  params={{ id: c.id }}
+                  className="flex items-center gap-1 text-[11px] font-medium text-primary transition-colors hover:text-primary/80"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <Sparkles className="h-3 w-3" />
-                  <span>Context Active</span>
-                </div>
+                  <span>View course</span>
+                </Link>
               </div>
             </div>
           ))}

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
 import {
@@ -6,6 +7,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { getDashboardStats } from "@/lib/lectures.functions";
 import { StatusBadge } from "@/components/lectures/status-badge";
 
@@ -19,8 +21,54 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
     ],
   }),
   loader: ({ context }) => context.queryClient.ensureQueryData(q),
-  component: Dashboard,
+  component: () => (
+    <Suspense fallback={<DashboardSkeleton />}>
+      <Dashboard />
+    </Suspense>
+  ),
 });
+
+function DashboardSkeleton() {
+  return (
+    <div className="mx-auto max-w-6xl px-6 py-8">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="space-y-2">
+          <Skeleton className="h-5 w-32" />
+          <Skeleton className="h-9 w-56" />
+        </div>
+        <div className="flex gap-2">
+          <Skeleton className="h-9 w-40" />
+          <Skeleton className="h-9 w-40" />
+        </div>
+      </div>
+      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="rounded-2xl border border-border/60 bg-card/40 p-5">
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="mt-3 h-9 w-16" />
+          </div>
+        ))}
+      </div>
+      <div className="mt-6 grid gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-2 rounded-2xl border border-border/60 bg-card/40 overflow-hidden">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="flex items-center justify-between px-5 py-4 border-b border-border/40">
+              <div className="space-y-1.5">
+                <Skeleton className="h-4 w-48" />
+                <Skeleton className="h-3 w-32" />
+              </div>
+              <Skeleton className="h-5 w-20 rounded-full" />
+            </div>
+          ))}
+        </div>
+        <div className="space-y-6">
+          <Skeleton className="h-36 w-full rounded-2xl" />
+          <Skeleton className="h-32 w-full rounded-2xl" />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function Dashboard() {
   const { data } = useSuspenseQuery(q);

@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -5,6 +6,7 @@ import { Mic, Plus, Clock } from "lucide-react";
 import { queryOptions } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { listLectures } from "@/lib/lectures.functions";
 import { StatusBadge } from "@/components/lectures/status-badge";
 
@@ -32,8 +34,37 @@ export const Route = createFileRoute("/_authenticated/lectures/")({
     void useServerFn; // preserve import for tree-shake safety in generated split
     return context.queryClient.ensureQueryData(lecturesQuery());
   },
-  component: LecturesList,
+  component: () => (
+    <Suspense fallback={<LecturesSkeleton />}>
+      <LecturesList />
+    </Suspense>
+  ),
 });
+
+function LecturesSkeleton() {
+  return (
+    <div className="mx-auto max-w-5xl px-6 py-8">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="space-y-2">
+          <Skeleton className="h-3 w-16" />
+          <Skeleton className="h-9 w-32" />
+        </div>
+        <Skeleton className="h-9 w-32" />
+      </div>
+      <div className="mt-8 overflow-hidden rounded-2xl border border-border/60 bg-card/40">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="flex items-center justify-between px-5 py-4 border-b border-border/40">
+            <div className="space-y-1.5">
+              <Skeleton className="h-4 w-52" />
+              <Skeleton className="h-3 w-28" />
+            </div>
+            <Skeleton className="h-5 w-20 rounded-full" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function fmtDuration(sec: number | null | undefined) {
   if (!sec) return "—";

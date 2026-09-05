@@ -20,6 +20,7 @@ import { Route as AuthenticatedDashboardRouteImport } from './routes/_authentica
 import { Route as AuthenticatedFlashcardsRouteImport } from './routes/_authenticated/flashcards'
 import { Route as AuthenticatedNotesRouteImport } from './routes/_authenticated/notes'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
+import { Route as AuthenticatedCoursesIdRouteImport } from './routes/_authenticated/courses.$id'
 import { Route as AuthenticatedLecturesIndexRouteImport } from './routes/_authenticated/lectures.index'
 import { Route as AuthenticatedLecturesIdRouteImport } from './routes/_authenticated/lectures.$id'
 import { Route as AuthenticatedLecturesNewRouteImport } from './routes/_authenticated/lectures.new'
@@ -78,6 +79,11 @@ const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedCoursesIdRoute = AuthenticatedCoursesIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => AuthenticatedCoursesRoute,
+} as any)
 const AuthenticatedLecturesIndexRoute =
   AuthenticatedLecturesIndexRouteImport.update({
     id: '/lectures/',
@@ -102,11 +108,12 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/analytics': typeof AuthenticatedAnalyticsRoute
   '/chat': typeof AuthenticatedChatRoute
-  '/courses': typeof AuthenticatedCoursesRoute
+  '/courses': typeof AuthenticatedCoursesRouteWithChildren
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/flashcards': typeof AuthenticatedFlashcardsRoute
   '/notes': typeof AuthenticatedNotesRoute
   '/settings': typeof AuthenticatedSettingsRoute
+  '/courses/$id': typeof AuthenticatedCoursesIdRoute
   '/lectures/$id': typeof AuthenticatedLecturesIdRoute
   '/lectures/new': typeof AuthenticatedLecturesNewRoute
   '/lectures/': typeof AuthenticatedLecturesIndexRoute
@@ -117,11 +124,12 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/analytics': typeof AuthenticatedAnalyticsRoute
   '/chat': typeof AuthenticatedChatRoute
-  '/courses': typeof AuthenticatedCoursesRoute
+  '/courses': typeof AuthenticatedCoursesRouteWithChildren
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/flashcards': typeof AuthenticatedFlashcardsRoute
   '/notes': typeof AuthenticatedNotesRoute
   '/settings': typeof AuthenticatedSettingsRoute
+  '/courses/$id': typeof AuthenticatedCoursesIdRoute
   '/lectures/$id': typeof AuthenticatedLecturesIdRoute
   '/lectures/new': typeof AuthenticatedLecturesNewRoute
   '/lectures': typeof AuthenticatedLecturesIndexRoute
@@ -134,11 +142,12 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/_authenticated/analytics': typeof AuthenticatedAnalyticsRoute
   '/_authenticated/chat': typeof AuthenticatedChatRoute
-  '/_authenticated/courses': typeof AuthenticatedCoursesRoute
+  '/_authenticated/courses': typeof AuthenticatedCoursesRouteWithChildren
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/flashcards': typeof AuthenticatedFlashcardsRoute
   '/_authenticated/notes': typeof AuthenticatedNotesRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
+  '/_authenticated/courses/$id': typeof AuthenticatedCoursesIdRoute
   '/_authenticated/lectures/$id': typeof AuthenticatedLecturesIdRoute
   '/_authenticated/lectures/new': typeof AuthenticatedLecturesNewRoute
   '/_authenticated/lectures/': typeof AuthenticatedLecturesIndexRoute
@@ -156,6 +165,7 @@ export interface FileRouteTypes {
     | '/flashcards'
     | '/notes'
     | '/settings'
+    | '/courses/$id'
     | '/lectures/$id'
     | '/lectures/new'
     | '/lectures/'
@@ -171,6 +181,7 @@ export interface FileRouteTypes {
     | '/flashcards'
     | '/notes'
     | '/settings'
+    | '/courses/$id'
     | '/lectures/$id'
     | '/lectures/new'
     | '/lectures'
@@ -187,6 +198,7 @@ export interface FileRouteTypes {
     | '/_authenticated/flashcards'
     | '/_authenticated/notes'
     | '/_authenticated/settings'
+    | '/_authenticated/courses/$id'
     | '/_authenticated/lectures/$id'
     | '/_authenticated/lectures/new'
     | '/_authenticated/lectures/'
@@ -278,6 +290,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/courses/$id': {
+      id: '/_authenticated/courses/$id'
+      path: '/$id'
+      fullPath: '/courses/$id'
+      preLoaderRoute: typeof AuthenticatedCoursesIdRouteImport
+      parentRoute: typeof AuthenticatedCoursesRoute
+    }
     '/_authenticated/lectures/': {
       id: '/_authenticated/lectures/'
       path: '/lectures'
@@ -302,10 +321,21 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AuthenticatedCoursesRouteChildren {
+  AuthenticatedCoursesIdRoute: typeof AuthenticatedCoursesIdRoute
+}
+
+const AuthenticatedCoursesRouteChildren: AuthenticatedCoursesRouteChildren = {
+  AuthenticatedCoursesIdRoute: AuthenticatedCoursesIdRoute,
+}
+
+const AuthenticatedCoursesRouteWithChildren =
+  AuthenticatedCoursesRoute._addFileChildren(AuthenticatedCoursesRouteChildren)
+
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedAnalyticsRoute: typeof AuthenticatedAnalyticsRoute
   AuthenticatedChatRoute: typeof AuthenticatedChatRoute
-  AuthenticatedCoursesRoute: typeof AuthenticatedCoursesRoute
+  AuthenticatedCoursesRoute: typeof AuthenticatedCoursesRouteWithChildren
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedFlashcardsRoute: typeof AuthenticatedFlashcardsRoute
   AuthenticatedNotesRoute: typeof AuthenticatedNotesRoute
@@ -318,7 +348,7 @@ interface AuthenticatedRouteRouteChildren {
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAnalyticsRoute: AuthenticatedAnalyticsRoute,
   AuthenticatedChatRoute: AuthenticatedChatRoute,
-  AuthenticatedCoursesRoute: AuthenticatedCoursesRoute,
+  AuthenticatedCoursesRoute: AuthenticatedCoursesRouteWithChildren,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedFlashcardsRoute: AuthenticatedFlashcardsRoute,
   AuthenticatedNotesRoute: AuthenticatedNotesRoute,
