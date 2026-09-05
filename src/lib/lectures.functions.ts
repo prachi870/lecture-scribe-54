@@ -749,24 +749,15 @@ export const checkAIProvider = createServerFn({ method: "GET" })
       return { ok: false, reason: "GEMINI_API_KEY is not set. Add it to your .env file and restart the server." };
     }
 
-    if (key.startsWith("AQ.")) {
-      return {
-        ok: false,
-        reason:
-          "The current GEMINI_API_KEY is a Lovable proxy key (AQ.…) with zero quota outside Lovable hosting. " +
-          "Replace it with a Google AI Studio key from https://aistudio.google.com/app/apikey",
-      };
-    }
-
     try {
       const { GoogleGenAI } = await import("@google/genai");
       const probe = new GoogleGenAI({ apiKey: key });
       const res = await probe.models.generateContent({
-        model: "gemini-2.0-flash",
-        contents: [{ role: "user", parts: [{ text: "1" }] }],
-        config: { maxOutputTokens: 1, temperature: 0 },
+        model: "gemini-3.6-flash",
+        contents: [{ role: "user", parts: [{ text: "Say: OK" }] }],
+        config: { maxOutputTokens: 50, temperature: 0 },
       });
-      if (res.text !== undefined) return { ok: true as const, reason: null };
+      if (res.text !== undefined && res.text !== null) return { ok: true as const, reason: null };
       return { ok: false as const, reason: "Gemini responded but returned no text." };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

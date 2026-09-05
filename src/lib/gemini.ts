@@ -28,7 +28,7 @@ function getAI(): GoogleGenAI {
   return _ai;
 }
 
-const MODEL = "gemini-2.0-flash";
+const MODEL = "gemini-3.6-flash";
 
 /**
  * Retry wrapper with exponential backoff for transient failures.
