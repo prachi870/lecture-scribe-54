@@ -18,7 +18,10 @@ import { Route as AuthenticatedChatRouteImport } from './routes/_authenticated/c
 import { Route as AuthenticatedCoursesRouteImport } from './routes/_authenticated/courses'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as AuthenticatedFlashcardsRouteImport } from './routes/_authenticated/flashcards'
+import { Route as AuthenticatedKnowledgeGraphRouteImport } from './routes/_authenticated/knowledge-graph'
 import { Route as AuthenticatedNotesRouteImport } from './routes/_authenticated/notes'
+import { Route as AuthenticatedQuizzesRouteImport } from './routes/_authenticated/quizzes'
+import { Route as AuthenticatedRevisionRouteImport } from './routes/_authenticated/revision'
 import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
 import { Route as AuthenticatedCoursesIdRouteImport } from './routes/_authenticated/courses.$id'
 import { Route as AuthenticatedLecturesIndexRouteImport } from './routes/_authenticated/lectures.index'
@@ -69,9 +72,25 @@ const AuthenticatedFlashcardsRoute = AuthenticatedFlashcardsRouteImport.update({
   path: '/flashcards',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedKnowledgeGraphRoute =
+  AuthenticatedKnowledgeGraphRouteImport.update({
+    id: '/knowledge-graph',
+    path: '/knowledge-graph',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedNotesRoute = AuthenticatedNotesRouteImport.update({
   id: '/notes',
   path: '/notes',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedQuizzesRoute = AuthenticatedQuizzesRouteImport.update({
+  id: '/quizzes',
+  path: '/quizzes',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedRevisionRoute = AuthenticatedRevisionRouteImport.update({
+  id: '/revision',
+  path: '/revision',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
@@ -111,7 +130,10 @@ export interface FileRoutesByFullPath {
   '/courses': typeof AuthenticatedCoursesRouteWithChildren
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/flashcards': typeof AuthenticatedFlashcardsRoute
+  '/knowledge-graph': typeof AuthenticatedKnowledgeGraphRoute
   '/notes': typeof AuthenticatedNotesRoute
+  '/quizzes': typeof AuthenticatedQuizzesRoute
+  '/revision': typeof AuthenticatedRevisionRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/courses/$id': typeof AuthenticatedCoursesIdRoute
   '/lectures/$id': typeof AuthenticatedLecturesIdRoute
@@ -127,7 +149,10 @@ export interface FileRoutesByTo {
   '/courses': typeof AuthenticatedCoursesRouteWithChildren
   '/dashboard': typeof AuthenticatedDashboardRoute
   '/flashcards': typeof AuthenticatedFlashcardsRoute
+  '/knowledge-graph': typeof AuthenticatedKnowledgeGraphRoute
   '/notes': typeof AuthenticatedNotesRoute
+  '/quizzes': typeof AuthenticatedQuizzesRoute
+  '/revision': typeof AuthenticatedRevisionRoute
   '/settings': typeof AuthenticatedSettingsRoute
   '/courses/$id': typeof AuthenticatedCoursesIdRoute
   '/lectures/$id': typeof AuthenticatedLecturesIdRoute
@@ -145,7 +170,10 @@ export interface FileRoutesById {
   '/_authenticated/courses': typeof AuthenticatedCoursesRouteWithChildren
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
   '/_authenticated/flashcards': typeof AuthenticatedFlashcardsRoute
+  '/_authenticated/knowledge-graph': typeof AuthenticatedKnowledgeGraphRoute
   '/_authenticated/notes': typeof AuthenticatedNotesRoute
+  '/_authenticated/quizzes': typeof AuthenticatedQuizzesRoute
+  '/_authenticated/revision': typeof AuthenticatedRevisionRoute
   '/_authenticated/settings': typeof AuthenticatedSettingsRoute
   '/_authenticated/courses/$id': typeof AuthenticatedCoursesIdRoute
   '/_authenticated/lectures/$id': typeof AuthenticatedLecturesIdRoute
@@ -163,7 +191,10 @@ export interface FileRouteTypes {
     | '/courses'
     | '/dashboard'
     | '/flashcards'
+    | '/knowledge-graph'
     | '/notes'
+    | '/quizzes'
+    | '/revision'
     | '/settings'
     | '/courses/$id'
     | '/lectures/$id'
@@ -179,7 +210,10 @@ export interface FileRouteTypes {
     | '/courses'
     | '/dashboard'
     | '/flashcards'
+    | '/knowledge-graph'
     | '/notes'
+    | '/quizzes'
+    | '/revision'
     | '/settings'
     | '/courses/$id'
     | '/lectures/$id'
@@ -196,7 +230,10 @@ export interface FileRouteTypes {
     | '/_authenticated/courses'
     | '/_authenticated/dashboard'
     | '/_authenticated/flashcards'
+    | '/_authenticated/knowledge-graph'
     | '/_authenticated/notes'
+    | '/_authenticated/quizzes'
+    | '/_authenticated/revision'
     | '/_authenticated/settings'
     | '/_authenticated/courses/$id'
     | '/_authenticated/lectures/$id'
@@ -276,11 +313,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedFlashcardsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/knowledge-graph': {
+      id: '/_authenticated/knowledge-graph'
+      path: '/knowledge-graph'
+      fullPath: '/knowledge-graph'
+      preLoaderRoute: typeof AuthenticatedKnowledgeGraphRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/notes': {
       id: '/_authenticated/notes'
       path: '/notes'
       fullPath: '/notes'
       preLoaderRoute: typeof AuthenticatedNotesRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/quizzes': {
+      id: '/_authenticated/quizzes'
+      path: '/quizzes'
+      fullPath: '/quizzes'
+      preLoaderRoute: typeof AuthenticatedQuizzesRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/revision': {
+      id: '/_authenticated/revision'
+      path: '/revision'
+      fullPath: '/revision'
+      preLoaderRoute: typeof AuthenticatedRevisionRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/settings': {
@@ -338,7 +396,10 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedCoursesRoute: typeof AuthenticatedCoursesRouteWithChildren
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
   AuthenticatedFlashcardsRoute: typeof AuthenticatedFlashcardsRoute
+  AuthenticatedKnowledgeGraphRoute: typeof AuthenticatedKnowledgeGraphRoute
   AuthenticatedNotesRoute: typeof AuthenticatedNotesRoute
+  AuthenticatedQuizzesRoute: typeof AuthenticatedQuizzesRoute
+  AuthenticatedRevisionRoute: typeof AuthenticatedRevisionRoute
   AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
   AuthenticatedLecturesIdRoute: typeof AuthenticatedLecturesIdRoute
   AuthenticatedLecturesNewRoute: typeof AuthenticatedLecturesNewRoute
@@ -351,7 +412,10 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedCoursesRoute: AuthenticatedCoursesRouteWithChildren,
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
   AuthenticatedFlashcardsRoute: AuthenticatedFlashcardsRoute,
+  AuthenticatedKnowledgeGraphRoute: AuthenticatedKnowledgeGraphRoute,
   AuthenticatedNotesRoute: AuthenticatedNotesRoute,
+  AuthenticatedQuizzesRoute: AuthenticatedQuizzesRoute,
+  AuthenticatedRevisionRoute: AuthenticatedRevisionRoute,
   AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
   AuthenticatedLecturesIdRoute: AuthenticatedLecturesIdRoute,
   AuthenticatedLecturesNewRoute: AuthenticatedLecturesNewRoute,

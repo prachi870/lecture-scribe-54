@@ -43,32 +43,14 @@ const workspace = [
 const learn = [
   { title: "Lectures", url: "/lectures", icon: Mic, live: true },
   { title: "AI Tutor", url: "/chat", icon: Bot, live: true },
-  {
-    title: "Knowledge Graph",
-    url: null,
-    icon: Network,
-    live: false,
-    badge: "Soon",
-  },
+  { title: "Knowledge Graph", url: "/knowledge-graph", icon: Network, live: true },
 ] as const;
 
 const studyTools = [
   { title: "Notes", url: "/notes", icon: BookOpen, live: true },
   { title: "Flashcards", url: "/flashcards", icon: Sparkles, live: true },
-  {
-    title: "Quizzes",
-    url: null,
-    icon: GraduationCap,
-    live: false,
-    badge: "Soon",
-  },
-  {
-    title: "Revision Plan",
-    url: null,
-    icon: Calendar,
-    live: false,
-    badge: "Soon",
-  },
+  { title: "Quizzes", url: "/quizzes", icon: GraduationCap, live: true },
+  { title: "Revision Plan", url: "/revision", icon: Calendar, live: true },
 ] as const;
 
 const insights = [
