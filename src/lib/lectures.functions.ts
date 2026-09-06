@@ -164,11 +164,46 @@ function extractYouTubeId(url: string): string | null {
 }
 
 async function fetchYouTubeTranscript(videoId: string): Promise<{ text: string; title: string }> {
-  // Fetch watch page and parse captionTracks
+  // Strategy 1: youtubetranscript.com public API (bypasses server-IP blocking)
+  try {
+    const apiRes = await fetch(
+      `https://youtubetranscript.com/?server_vid=${videoId}`,
+      {
+        headers: {
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
+          "accept": "text/html,application/xhtml+xml",
+        },
+      }
+    );
+    if (apiRes.ok) {
+      const html = await apiRes.text();
+      // Extract title from OG tags or title tag
+      const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i) ||
+                         html.match(/og:title.*?content="([^"]+)"/);
+      const rawTitle = titleMatch?.[1] ?? "";
+      // Parse transcript XML embedded in the response
+      const xmlMatch = html.match(/<text[^>]*>([\s\S]*?)<\/text>/g);
+      if (xmlMatch && xmlMatch.length > 10) {
+        const text = xmlMatch
+          .map((t) => t.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;/g, "'").replace(/&quot;/g, '"').trim())
+          .filter(Boolean)
+          .join(" ")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (text.length > 100) {
+          const title = rawTitle.replace(/ - YouTube Transcript$/, "").trim() || `YouTube ${videoId}`;
+          return { text, title };
+        }
+      }
+    }
+  } catch {
+    // Strategy 1 failed — try strategy 2
+  }
+
+  // Strategy 2: Fetch YouTube watch page and parse captionTracks, then fetch via timedtext API
   const res = await fetch(`https://www.youtube.com/watch?v=${videoId}&hl=en`, {
     headers: {
-      "user-agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
       "accept-language": "en-US,en;q=0.9",
     },
   });
@@ -179,60 +214,53 @@ async function fetchYouTubeTranscript(videoId: string): Promise<{ text: string; 
   const title = titleMatch?.[1]?.replace(/ - YouTube$/, "").trim() || `YouTube ${videoId}`;
 
   const m = html.match(/"captionTracks":(\[.*?\])/);
-  if (!m) throw new Error("No captions available for this video. Try one with subtitles.");
+  if (!m) throw new Error("No captions available for this video. Try one with subtitles or use the Upload tab.");
   let tracks: Array<{ baseUrl: string; languageCode?: string; kind?: string }> = [];
-  try {
-    tracks = JSON.parse(m[1]);
-  } catch {
-    throw new Error("Failed to parse captions.");
-  }
+  try { tracks = JSON.parse(m[1]); } catch { throw new Error("Failed to parse captions."); }
   if (!tracks.length) throw new Error("No captions available for this video.");
 
-  // Try every English track in order until one returns non-empty content.
-  // YouTube sometimes returns HTTP 200 with 0 bytes for certain track types
-  // depending on IP/region — iterate all en tracks as fallback.
-  const enTracks = [
-    ...tracks.filter((t) => t.languageCode === "en" && !t.kind),
-    ...tracks.filter((t) => t.languageCode === "en"),
-    ...tracks.filter((t) => t.languageCode?.startsWith("en")),
-    tracks[0],
+  // Strategy 3: Use YouTube's timedtext API directly (more reliable than baseUrl)
+  // Extract video language from tracks and call the timedtext endpoint
+  const enTrack = tracks.find((t) => t.languageCode === "en" && !t.kind)
+    || tracks.find((t) => t.languageCode === "en")
+    || tracks.find((t) => t.languageCode?.startsWith("en"))
+    || tracks[0];
+
+  const lang = enTrack.languageCode ?? "en";
+  const kind = enTrack.kind ?? "";
+
+  // Timedtext API — more reliable than baseUrl which gets blocked
+  const timedtextUrls = [
+    `https://www.youtube.com/api/timedtext?v=${videoId}&lang=${lang}&fmt=json3`,
+    `https://www.youtube.com/api/timedtext?v=${videoId}&lang=${lang}&kind=${kind}&fmt=json3`,
+    // Also try from baseUrl (may work from some IPs)
+    ...(enTrack.baseUrl ? [enTrack.baseUrl.replace(/\\u0026/g, "&") + "&fmt=json3"] : []),
   ];
-  // Deduplicate by baseUrl
-  const seen = new Set<string>();
-  const uniqueTracks = enTracks.filter((t) => {
-    if (seen.has(t.baseUrl)) return false;
-    seen.add(t.baseUrl);
-    return true;
-  });
 
   let capRaw = "";
-  let lastError = "";
-  for (const track of uniqueTracks) {
-    const capUrl = track.baseUrl.replace(/\\u0026/g, "&") + "&fmt=json3";
+  for (const url of timedtextUrls) {
     try {
-      const capRes = await fetch(capUrl);
-      if (!capRes.ok) { lastError = `HTTP ${capRes.status}`; continue; }
-      const text = await capRes.text().catch(() => "");
-      if (text && text.trim().length > 10) { capRaw = text; break; }
-      lastError = "empty response";
-    } catch (e) {
-      lastError = e instanceof Error ? e.message : String(e);
-    }
+      const r = await fetch(url, {
+        headers: {
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
+        },
+      });
+      const txt = r.ok ? await r.text().catch(() => "") : "";
+      if (txt && txt.trim().length > 10) { capRaw = txt; break; }
+    } catch { continue; }
   }
 
   if (!capRaw || !capRaw.trim()) {
     throw new Error(
-      `No caption content could be retrieved for this video. ` +
-      `YouTube may be blocking caption access from the server (last error: ${lastError}). ` +
-      `Try a different video or download the audio and use the Upload tab.`
+      "No caption content could be retrieved for this video. " +
+      "YouTube may be blocking caption access from the server. " +
+      "Try a different video, or download the audio file and use the Upload tab."
     );
   }
 
   let cap: { events?: Array<{ segs?: Array<{ utf8?: string }> }> } = {};
-  try {
-    cap = JSON.parse(capRaw);
-  } catch {
-    throw new Error("Failed to parse YouTube subtitle track data. The response was not valid JSON.");
+  try { cap = JSON.parse(capRaw); } catch {
+    throw new Error("Failed to parse YouTube subtitle data.");
   }
 
   const text = (cap.events || [])
@@ -241,11 +269,49 @@ async function fetchYouTubeTranscript(videoId: string): Promise<{ text: string; 
     .replace(/\s+/g, " ")
     .replace(/\n/g, " ")
     .trim();
-  if (!text) {
-    throw new Error("The subtitle track for this YouTube video contained no text content.");
-  }
+
+  if (!text) throw new Error("The subtitle track contained no text content.");
   return { text, title };
 }
+
+const IngestDocumentInput = z.object({
+  title: z.string().min(1).max(200),
+  course_id: z.string().uuid().nullable().optional(),
+  transcript: z.string().min(20).max(500000),
+});
+
+/**
+ * Insert a lecture whose transcript was extracted client-side from a document
+ * (PDF, DOCX, TXT). No audio upload — goes straight to completed+notes.
+ */
+export const ingestDocumentText = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((v: unknown) => IngestDocumentInput.parse(v))
+  .handler(async ({ data, context }) => {
+    const { data: row, error } = await context.supabase
+      .from("lectures")
+      .insert({
+        user_id: context.userId,
+        title: data.title,
+        course_id: data.course_id ?? null,
+        status: "ready",
+        transcript_status: "completed",
+        transcript: data.transcript,
+        transcribed_at: new Date().toISOString(),
+        recorded_at: new Date().toISOString(),
+      })
+      .select("id")
+      .single();
+    if (error) throw new Error(error.message);
+
+    try {
+      await runGenerateNotes(context.supabase, context.userId, row.id, data.transcript);
+    } catch (e) {
+      console.error("notes failed", e);
+    }
+
+    return { id: row.id };
+  });
 
 const IngestUrlInput = z.object({
   url: z.string().url().max(500),
