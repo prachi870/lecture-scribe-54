@@ -78,7 +78,7 @@ export function AppSidebar() {
     queryClient.clear();
     await supabase.auth.signOut();
     toast.success("Signed out successfully");
-    navigate({ to: "/auth", replace: true });
+    navigate({ to: "/auth", replace: true, search: { signout: "1" } });
   };
 
   return (

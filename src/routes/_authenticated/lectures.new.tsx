@@ -10,11 +10,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
+import { classifyFile, extractDocumentText } from "@/lib/extract-document";
 import {
   checkAIProvider,
   createLecture,
   finalizeLectureUpload,
   ingestLectureFromUrl,
+  ingestDocumentText,
   transcribeLecture,
   listCoursesForPicker,
 } from "@/lib/lectures.functions";
@@ -49,6 +51,7 @@ function NewLecture() {
   const finalizeFn = useServerFn(finalizeLectureUpload);
   const transcribeFn = useServerFn(transcribeLecture);
   const ingestFn = useServerFn(ingestLectureFromUrl);
+  const ingestDocumentFn = useServerFn(ingestDocumentText);
 
   // Probe AI provider once on mount — surface a banner before the user wastes time uploading
   const aiStatusQuery = useQuery({
@@ -91,7 +94,26 @@ function NewLecture() {
         ext = extFromMime(recorder.mimeType);
         duration = recorder.duration;
       } else {
-        if (!file) throw new Error("Please choose an audio file.");
+        if (!file) throw new Error("Please choose a file.");
+        const kind = classifyFile(file);
+
+        // ── Document path: extract text client-side, skip Gemini transcription ──
+        if (kind !== "audio") {
+          toast.info("Extracting text from document…");
+          const text = await extractDocumentText(file);
+          if (!text || text.trim().length < 20) {
+            throw new Error("Could not extract enough text from this document.");
+          }
+          const { id } = await ingestDocumentFn({
+            data: {
+              title: finalTitle || file.name.replace(/\.[^.]+$/, ""),
+              course_id: courseId || null,
+              transcript: text.trim(),
+            },
+          });
+          return id;
+        }
+
         blob = file;
         ext = file.name.split(".").pop()?.toLowerCase() || extFromMime(file.type);
       }
@@ -107,7 +129,7 @@ function NewLecture() {
       const path = `${userId}/${id}.${ext}`;
       const { error: upErr } = await supabase.storage
         .from("lecture-audio")
-        .upload(path, blob, { contentType: blob.type || "audio/webm", upsert: true });
+        .upload(path, blob!, { contentType: blob!.type || "audio/webm", upsert: true });
       if (upErr) throw new Error(`Audio upload failed: ${upErr.message}`);
 
       await finalizeFn({ data: { id, audio_path: path, duration_seconds: duration || null } });
@@ -118,7 +140,7 @@ function NewLecture() {
     },
     onSuccess: async (id) => {
       await qc.invalidateQueries({ queryKey: ["lectures"] });
-      toast.success(mode === "url" ? "Lecture imported! Generating notes…" : "Lecture created! Transcription is processing…");
+      toast.success(mode === "url" ? "Lecture imported! Generating notes…" : "Lecture created! Processing…");
       navigate({ to: "/lectures/$id", params: { id } });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Failed to create lecture"),

@@ -58,8 +58,14 @@ function AuthPage() {
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
 
-  // Already signed in → go to dashboard
+  // Only auto-redirect to dashboard if user is already signed in AND
+  // did not explicitly navigate to /auth to sign out or switch accounts.
+  // Check for ?signout=1 query param which the logout flow appends.
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const intentionalVisit = params.has("signout") || params.has("switch");
+    if (intentionalVisit) return; // user wants to see the auth page
+
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) navigate({ to: "/dashboard", replace: true });
     });
