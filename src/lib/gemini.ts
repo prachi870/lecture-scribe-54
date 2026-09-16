@@ -8,7 +8,7 @@
  *     → whisper-large-v3-turbo  (purpose-built STT, 20 audio files/hour free)
  *
  * Gemini (fallback when GROQ_API_KEY is absent):
- *   - gemini-3.5-flash / gemini-3.6-flash  (20–100 req/day free)
+ *   - gemini-2.5-flash / gemini-2.5-flash-lite  (free tier)
  *
  * Priority:  GROQ_API_KEY > GEMINI_API_KEY
  */
@@ -37,7 +37,7 @@ function getGemini(): GoogleGenAI {
 }
 
 // Gemini model rotation (fallback when Groq unavailable)
-const GEMINI_MODELS = ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.5-flash-lite"];
+const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"];
 const GROQ_CHAT_MODEL = "qwen/qwen3.8-27b";
 const GROQ_TRANSCRIBE_MODEL = "whisper-large-v3-turbo";
 
@@ -49,7 +49,7 @@ async function groqJSON<T>(prompt: string, systemPrompt: string): Promise<T> {
       { role: "system", content: systemPrompt },
       { role: "user", content: prompt },
     ],
-    max_tokens: 900,   // Groq free tier: 1000 output tokens/min limit — stay under safely
+    max_tokens: 4096,  // Raised: complex outputs (exam prep, mind maps) need 2k+ tokens
     temperature: 0.7,
     response_format: { type: "json_object" },
   });
@@ -122,7 +122,7 @@ async function groqChat(
   const completion = await getGroq().chat.completions.create({
     model: GROQ_CHAT_MODEL,
     messages: msgs,
-    max_tokens: 900,   // Groq free tier: 1000 output tokens/min — stay safe
+    max_tokens: 4096,  // Raised: allow full chat responses
     temperature: 0.7,
   });
   const text = completion.choices[0]?.message?.content?.trim() ?? "";

@@ -16,7 +16,7 @@ const CreateInput = z.object({
 
 export const createLecture = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((v: unknown) => CreateInput.parse(v))
+  .validator((v: unknown) => CreateInput.parse(v))
   .handler(async ({ data, context }) => {
     const { data: row, error } = await context.supabase
       .from("lectures")
@@ -41,7 +41,7 @@ const FinalizeInput = z.object({
 
 export const finalizeLectureUpload = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((v: unknown) => FinalizeInput.parse(v))
+  .validator((v: unknown) => FinalizeInput.parse(v))
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase
       .from("lectures")
@@ -69,7 +69,7 @@ async function runTranscription(
 ) {
   const { data: lecture, error: fetchErr } = await supabase
     .from("lectures")
-    .select("id, audio_path, transcript")
+    .select("id, audio_path, transcript, source_url")
     .eq("id", id)
     .eq("user_id", userId)
     .single();
@@ -85,20 +85,26 @@ async function runTranscription(
     let transcript = lecture.transcript?.trim() ?? "";
 
     if (!transcript) {
-      if (!lecture.audio_path) {
-        throw new Error("No audio path recorded for this lecture.");
+      if (lecture.audio_path) {
+        // Uploaded / recorded audio file
+        const { data: signed, error: signErr } = await supabase.storage
+          .from("lecture-audio")
+          .createSignedUrl(lecture.audio_path, 60 * 10);
+        if (signErr || !signed?.signedUrl) throw new Error(signErr?.message || "Failed to sign audio URL");
+
+        const audioRes = await fetch(signed.signedUrl);
+        if (!audioRes.ok) throw new Error(`Failed to fetch audio (${audioRes.status})`);
+        const audioBlob = await audioRes.blob();
+
+        transcript = await geminiTranscribe(audioBlob, lecture.audio_path);
+      } else if (lecture.source_url) {
+        // YouTube video without subtitles — download audio and transcribe via Whisper
+        const vid = extractYouTubeId(lecture.source_url);
+        if (!vid) throw new Error("No audio file or valid YouTube URL found for this lecture.");
+        transcript = await transcribeYouTubeAudio(vid);
+      } else {
+        throw new Error("No audio file or YouTube source found for this lecture.");
       }
-
-      const { data: signed, error: signErr } = await supabase.storage
-        .from("lecture-audio")
-        .createSignedUrl(lecture.audio_path, 60 * 10);
-      if (signErr || !signed?.signedUrl) throw new Error(signErr?.message || "Failed to sign audio URL");
-
-      const audioRes = await fetch(signed.signedUrl);
-      if (!audioRes.ok) throw new Error(`Failed to fetch audio (${audioRes.status})`);
-      const audioBlob = await audioRes.blob();
-
-      transcript = await geminiTranscribe(audioBlob, lecture.audio_path);
     }
 
     await supabase
@@ -134,14 +140,14 @@ async function runTranscription(
 
 export const transcribeLecture = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((v: unknown) => IdInput.parse(v))
+  .validator((v: unknown) => IdInput.parse(v))
   .handler(async ({ data, context }) => {
     return runTranscription(context.supabase, context.userId, data.id);
   });
 
 export const retryTranscription = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((v: unknown) => IdInput.parse(v))
+  .validator((v: unknown) => IdInput.parse(v))
   .handler(async ({ data, context }) => {
     return runTranscription(context.supabase, context.userId, data.id);
   });
@@ -161,6 +167,74 @@ function extractYouTubeId(url: string): string | null {
   } catch {
     return null;
   }
+}
+
+// ── YouTube audio transcription (no-subtitle fallback) ───────────────────
+// Extracts audio via cobalt.tools or Piped API, then transcribes with Groq Whisper.
+async function transcribeYouTubeAudio(videoId: string): Promise<string> {
+  const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  let audioUrl: string | null = null;
+  let audioMime = "audio/mp4";
+
+  // Strategy A: cobalt.tools public REST API
+  try {
+    const cobaltRes = await fetch("https://api.cobalt.tools/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ url: youtubeUrl, downloadMode: "audio", audioFormat: "mp3", audioBitrate: "96" }),
+    });
+    if (cobaltRes.ok) {
+      const cobaltData = await cobaltRes.json() as { status?: string; url?: string };
+      if ((cobaltData.status === "redirect" || cobaltData.status === "tunnel") && cobaltData.url) {
+        audioUrl = cobaltData.url;
+        audioMime = "audio/mpeg";
+      }
+    }
+  } catch { /* fall through to Piped */ }
+
+  // Strategy B: Piped API public instances
+  if (!audioUrl) {
+    const PIPED_INSTANCES = [
+      "https://pipedapi.kavin.rocks",
+      "https://pipedapi.adminforge.de",
+      "https://api.piped.projectsegfault.com",
+    ];
+    for (const host of PIPED_INSTANCES) {
+      try {
+        const r = await fetch(`${host}/streams/${videoId}`, {
+          headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0" },
+        });
+        if (!r.ok) continue;
+        const d = await r.json() as { audioStreams?: Array<{ url: string; mimeType?: string; bitrate?: number }> };
+        const streams = (d.audioStreams ?? []).sort((a, b) => (a.bitrate ?? 9e9) - (b.bitrate ?? 9e9));
+        const best = streams[0];
+        if (best?.url) { audioUrl = best.url; audioMime = best.mimeType ?? "audio/mp4"; break; }
+      } catch { continue; }
+    }
+  }
+
+  if (!audioUrl) {
+    throw new Error(
+      "Could not extract audio from this YouTube video. " +
+      "It may be private, age-restricted, or geo-blocked. " +
+      "Try downloading the audio manually and using the Upload tab."
+    );
+  }
+
+  // Download audio — Groq Whisper file size limit is 25 MB
+  const MAX_BYTES = 25 * 1024 * 1024;
+  const audioRes = await fetch(audioUrl, { headers: { Range: `bytes=0-${MAX_BYTES - 1}` } });
+  if (!audioRes.ok && audioRes.status !== 206) {
+    throw new Error(`Audio download failed: HTTP ${audioRes.status}`);
+  }
+  const audioBlob = await audioRes.blob();
+  if (!audioBlob.size) throw new Error("Downloaded audio was empty.");
+
+  const ext = audioMime.includes("mpeg") || audioMime.includes("mp3") ? "mp3"
+    : audioMime.includes("mp4") || audioMime.includes("m4a") ? "m4a"
+    : audioMime.includes("webm") ? "webm" : "mp3";
+
+  return geminiTranscribe(new Blob([audioBlob], { type: audioMime }), `yt_audio.${ext}`);
 }
 
 async function fetchYouTubeTranscript(videoId: string): Promise<{ text: string; title: string }> {
@@ -286,7 +360,7 @@ const IngestDocumentInput = z.object({
  */
 export const ingestDocumentText = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((v: unknown) => IngestDocumentInput.parse(v))
+  .validator((v: unknown) => IngestDocumentInput.parse(v))
   .handler(async ({ data, context }) => {
     const { data: row, error } = await context.supabase
       .from("lectures")
@@ -320,7 +394,7 @@ const IngestUrlInput = z.object({
 
 export const ingestLectureFromUrl = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((v: unknown) => IngestUrlInput.parse(v))
+  .validator((v: unknown) => IngestUrlInput.parse(v))
   .handler(async ({ data, context }) => {
     const vid = extractYouTubeId(data.url);
     if (!vid) {
@@ -328,32 +402,81 @@ export const ingestLectureFromUrl = createServerFn({ method: "POST" })
         "Only YouTube links are supported for URL ingestion. Please upload the audio file for other sources.",
       );
     }
-    const { text, title } = await fetchYouTubeTranscript(vid);
 
-    const { data: row, error } = await context.supabase
-      .from("lectures")
-      .insert({
-        user_id: context.userId,
-        title,
-        course_id: data.course_id ?? null,
-        source_url: data.url,
-        status: "ready",
-        transcript_status: "completed",
-        transcript: text,
-        transcribed_at: new Date().toISOString(),
-        recorded_at: new Date().toISOString(),
-      })
-      .select("id")
-      .single();
-    if (error) throw new Error(error.message);
+    // ── Try captions first (fast path) ──────────────────────────────────────
+    let captionText: string | null = null;
+    let title = `YouTube ${vid}`;
 
     try {
-      await runGenerateNotes(context.supabase, context.userId, row.id, text);
-    } catch (e) {
-      console.error("notes failed", e);
+      const result = await fetchYouTubeTranscript(vid);
+      captionText = result.text;
+      title = result.title;
+    } catch {
+      // Captions unavailable — fall back to audio transcription.
+      // Try to at least extract the video title from the YouTube page.
+      try {
+        const pageRes = await fetch(`https://www.youtube.com/watch?v=${vid}&hl=en`, {
+          headers: {
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
+          },
+        });
+        if (pageRes.ok) {
+          const html = await pageRes.text();
+          const m = html.match(/<title>([^<]*)<\/title>/);
+          if (m?.[1]) title = m[1].replace(/ - YouTube$/, "").trim();
+        }
+      } catch { /* keep default title */ }
     }
 
-    return { id: row.id };
+    if (captionText) {
+      // ── Fast path: captions found → completed lecture immediately ──────────
+      const { data: row, error } = await context.supabase
+        .from("lectures")
+        .insert({
+          user_id: context.userId,
+          title,
+          course_id: data.course_id ?? null,
+          source_url: data.url,
+          status: "ready",
+          transcript_status: "completed",
+          transcript: captionText,
+          transcribed_at: new Date().toISOString(),
+          recorded_at: new Date().toISOString(),
+        })
+        .select("id")
+        .single();
+      if (error) throw new Error(error.message);
+
+      try {
+        await runGenerateNotes(context.supabase, context.userId, row.id, captionText);
+      } catch (e) { console.error("auto-notes failed:", e); }
+
+      return { id: row.id };
+    } else {
+      // ── Slow path: no captions → create pending lecture, audio transcription fires async ──
+      const { data: row, error } = await context.supabase
+        .from("lectures")
+        .insert({
+          user_id: context.userId,
+          title,
+          course_id: data.course_id ?? null,
+          source_url: data.url,
+          status: "processing",
+          transcript_status: "pending",
+          recorded_at: new Date().toISOString(),
+        })
+        .select("id")
+        .single();
+      if (error) throw new Error(error.message);
+
+      // Fire audio transcription server-side — the lecture detail page will
+      // poll every 1s and auto-trigger via retryTranscription if this fails.
+      runTranscription(context.supabase, context.userId, row.id).catch((e) =>
+        console.error("[YT audio transcription]", e instanceof Error ? e.message : e)
+      );
+
+      return { id: row.id };
+    }
   });
 
 // ---------- AI Notes ----------
@@ -406,14 +529,14 @@ async function runGenerateNotes(
 
 export const generateLectureNotes = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((v: unknown) => IdInput.parse(v))
+  .validator((v: unknown) => IdInput.parse(v))
   .handler(async ({ data, context }) => {
     return runGenerateNotes(context.supabase, context.userId, data.id);
   });
 
 export const getLectureNotes = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((v: unknown) => IdInput.parse(v))
+  .validator((v: unknown) => IdInput.parse(v))
   .handler(async ({ data, context }) => {
     const { data: row } = await context.supabase
       .from("lecture_notes")
@@ -428,7 +551,7 @@ type FlashShape = { cards: Array<{ question: string; answer: string; difficulty?
 
 export const generateFlashcards = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((v: unknown) => IdInput.parse(v))
+  .validator((v: unknown) => IdInput.parse(v))
   .handler(async ({ data, context }) => {
     const { data: lec } = await context.supabase
       .from("lectures")
@@ -462,7 +585,7 @@ export const generateFlashcards = createServerFn({ method: "POST" })
 
 export const listFlashcards = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((v: unknown) => IdInput.parse(v))
+  .validator((v: unknown) => IdInput.parse(v))
   .handler(async ({ data, context }) => {
     const { data: rows } = await context.supabase
       .from("flashcards")
@@ -544,7 +667,7 @@ const ChatInput = z.object({
 
 export const chatWithLecture = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((v: unknown) => ChatInput.parse(v))
+  .validator((v: unknown) => ChatInput.parse(v))
   .handler(async ({ data, context }) => {
     const { data: lec } = await context.supabase
       .from("lectures")
@@ -618,7 +741,7 @@ type ExamPrepShape = {
 
 export const generateExamPrep = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((v: unknown) => IdInput.parse(v))
+  .validator((v: unknown) => IdInput.parse(v))
   .handler(async ({ data, context }) => {
     const { data: lec } = await context.supabase
       .from("lectures")
@@ -655,7 +778,7 @@ type MindMapShape = {
 
 export const generateMindMap = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((v: unknown) => IdInput.parse(v))
+  .validator((v: unknown) => IdInput.parse(v))
   .handler(async ({ data, context }) => {
     const { data: lec } = await context.supabase
       .from("lectures")
@@ -689,7 +812,7 @@ type RevisionPlanShape = {
 
 export const generateRevisionPlan = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((v: unknown) => IdInput.parse(v))
+  .validator((v: unknown) => IdInput.parse(v))
   .handler(async ({ data, context }) => {
     const { data: lec } = await context.supabase
       .from("lectures")
@@ -711,7 +834,7 @@ export const generateRevisionPlan = createServerFn({ method: "POST" })
 
 export const listChatMessages = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((v: unknown) => IdInput.parse(v))
+  .validator((v: unknown) => IdInput.parse(v))
   .handler(async ({ data, context }) => {
     const { data: rows } = await context.supabase
       .from("chat_messages")
@@ -723,7 +846,7 @@ export const listChatMessages = createServerFn({ method: "POST" })
 
 export const clearChat = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((v: unknown) => IdInput.parse(v))
+  .validator((v: unknown) => IdInput.parse(v))
   .handler(async ({ data, context }) => {
     await context.supabase.from("chat_messages").delete().eq("lecture_id", data.id);
     return { ok: true };
@@ -744,7 +867,7 @@ export const listLectures = createServerFn({ method: "GET" })
 
 export const getLecture = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((v: unknown) => IdInput.parse(v))
+  .validator((v: unknown) => IdInput.parse(v))
   .handler(async ({ data, context }) => {
     const { data: row, error } = await context.supabase
       .from("lectures")
@@ -769,7 +892,7 @@ export const getLecture = createServerFn({ method: "POST" })
 
 export const deleteLecture = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((v: unknown) => IdInput.parse(v))
+  .validator((v: unknown) => IdInput.parse(v))
   .handler(async ({ data, context }) => {
     const { data: row } = await context.supabase
       .from("lectures")
@@ -864,6 +987,47 @@ export const checkAIProvider = createServerFn({ method: "GET" })
     }
   });
 
+// ---------- Helpers ----------
+function computeStreak(dates: string[]): number {
+  if (!dates.length) return 0;
+  const daySet = new Set(dates.map((d) => new Date(d).toISOString().slice(0, 10)));
+  const sorted = [...daySet].sort().reverse();
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  if (!daySet.has(today) && !daySet.has(yesterday)) return 0;
+  let streak = 0;
+  let check = daySet.has(today) ? new Date(today) : new Date(yesterday);
+  while (daySet.has(check.toISOString().slice(0, 10))) {
+    streak++;
+    check = new Date(check.getTime() - 86400000);
+  }
+  return streak;
+}
+
+function extractConcepts(notesRows: Array<{ key_points: unknown; glossary: unknown }>): Array<{ concept: string; score: number }> {
+  const freq = new Map<string, number>();
+  for (const n of notesRows) {
+    const kp = Array.isArray(n.key_points) ? (n.key_points as string[]) : [];
+    const gl = Array.isArray(n.glossary) ? (n.glossary as Array<{ term?: string }>) : [];
+    for (const point of kp) {
+      const words = String(point).split(/[:.–—,]/)[0].trim().slice(0, 40);
+      if (words.length > 3) freq.set(words, (freq.get(words) ?? 0) + 1);
+    }
+    for (const g of gl) {
+      const term = String(g.term ?? "").trim().slice(0, 40);
+      if (term.length > 2) freq.set(term, (freq.get(term) ?? 0) + 1);
+    }
+  }
+  const maxFreq = Math.max(1, ...freq.values());
+  return [...freq.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([concept, count]) => ({
+      concept,
+      score: Math.min(98, Math.round(40 + (count / maxFreq) * 55)),
+    }));
+}
+
 // ---------- Dashboard stats ----------
 export const getDashboardStats = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -876,7 +1040,7 @@ export const getDashboardStats = createServerFn({ method: "GET" })
 
     const { data: notes } = await context.supabase
       .from("lecture_notes")
-      .select("lecture_id");
+      .select("lecture_id, key_points, glossary");
 
     const { data: flashcards } = await context.supabase
       .from("flashcards")
@@ -885,6 +1049,8 @@ export const getDashboardStats = createServerFn({ method: "GET" })
 
     const totalSeconds = (lectures ?? []).reduce((a, l) => a + (l.duration_seconds ?? 0), 0);
     const ready = (lectures ?? []).filter((l) => l.transcript_status === "completed").length;
+    const streak = computeStreak((lectures ?? []).map((l) => l.created_at));
+    const topConcepts = extractConcepts((notes ?? []) as Array<{ key_points: unknown; glossary: unknown }>);
 
     return {
       lectureCount: lectures?.length ?? 0,
@@ -893,6 +1059,8 @@ export const getDashboardStats = createServerFn({ method: "GET" })
       flashcardsCount: flashcards?.length ?? 0,
       readyCount: ready,
       recent: (lectures ?? []).slice(0, 5),
+      streak,
+      topConcepts,
     };
   });
 
@@ -908,7 +1076,7 @@ export const getAnalyticsData = createServerFn({ method: "GET" })
 
     const { data: notes } = await context.supabase
       .from("lecture_notes")
-      .select("lecture_id");
+      .select("lecture_id, key_points, glossary");
 
     const { data: flashcards } = await context.supabase
       .from("flashcards")
@@ -979,6 +1147,9 @@ export const getAnalyticsData = createServerFn({ method: "GET" })
       timelineMap[dateStr].durationMinutes += Math.round((l.duration_seconds ?? 0) / 60);
     });
 
+    const streak = computeStreak((lectures ?? []).map((l) => l.created_at));
+    const conceptMastery = extractConcepts((notes ?? []) as Array<{ key_points: unknown; glossary: unknown }>);
+
     return {
       totalLectures: lectures?.length ?? 0,
       totalHours: +(totalSeconds / 3600).toFixed(1),
@@ -988,6 +1159,8 @@ export const getAnalyticsData = createServerFn({ method: "GET" })
       courseDistribution,
       difficultyBreakdown,
       activityTimeline: Object.values(timelineMap).slice(-10),
+      streak,
+      conceptMastery,
     };
   });
 

@@ -97,9 +97,11 @@ function Dashboard() {
               <Brain className="h-3.5 w-3.5" />
               AI Learning Operating System
             </span>
-            <span className="flex items-center gap-1 font-mono text-[11px] font-semibold text-warning">
-              <Flame className="h-3.5 w-3.5 text-warning fill-warning" /> 7 Day Streak
-            </span>
+            {data.streak > 0 && (
+              <span className="flex items-center gap-1 font-mono text-[11px] font-semibold text-warning">
+                <Flame className="h-3.5 w-3.5 text-warning fill-warning" /> {data.streak} Day Streak
+              </span>
+            )}
           </div>
           <h1 className="mt-2 font-display text-3xl font-bold tracking-tight">Learning Cockpit</h1>
         </div>
@@ -215,26 +217,25 @@ function Dashboard() {
               <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Concept Mastery Radar</h3>
               <Target className="h-4 w-4 text-warning" />
             </div>
-            <div className="space-y-2.5 text-xs">
-              <div>
-                <div className="flex justify-between font-medium">
-                  <span>Gradient Descent</span>
-                  <span className="font-mono text-warning">45% (Needs Review)</span>
-                </div>
-                <div className="mt-1 h-1.5 w-full rounded-full bg-border/50 overflow-hidden">
-                  <div className="h-full bg-warning rounded-full" style={{ width: "45%" }} />
-                </div>
+            {data.topConcepts && data.topConcepts.length > 0 ? (
+              <div className="space-y-2.5 text-xs">
+                {data.topConcepts.slice(0, 4).map((c: { concept: string; score: number }) => (
+                  <div key={c.concept}>
+                    <div className="flex justify-between font-medium">
+                      <span className="truncate mr-2">{c.concept}</span>
+                      <span className={`font-mono shrink-0 ${c.score < 50 ? "text-destructive" : c.score < 75 ? "text-warning" : "text-success"}`}>
+                        {c.score}%{c.score < 50 ? " (Review)" : c.score < 75 ? " (Growing)" : " (Strong)"}
+                      </span>
+                    </div>
+                    <div className="mt-1 h-1.5 w-full rounded-full bg-border/50 overflow-hidden">
+                      <div className={`h-full rounded-full ${c.score < 50 ? "bg-destructive" : c.score < 75 ? "bg-warning" : "bg-success"}`} style={{ width: `${c.score}%` }} />
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div>
-                <div className="flex justify-between font-medium">
-                  <span>Convolutional Layers</span>
-                  <span className="font-mono text-success">82% (Mastered)</span>
-                </div>
-                <div className="mt-1 h-1.5 w-full rounded-full bg-border/50 overflow-hidden">
-                  <div className="h-full bg-success rounded-full" style={{ width: "82%" }} />
-                </div>
-              </div>
-            </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">Add lectures and generate notes to see concept mastery here.</p>
+            )}
           </div>
         </aside>
       </div>

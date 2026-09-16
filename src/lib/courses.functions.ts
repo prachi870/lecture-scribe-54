@@ -38,7 +38,7 @@ export const listCourses = createServerFn({ method: "GET" })
 
 export const createCourse = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((v: unknown) => CourseInput.parse(v))
+  .validator((v: unknown) => CourseInput.parse(v))
   .handler(async ({ data, context }) => {
     const { data: row, error } = await context.supabase
       .from("courses")
@@ -59,7 +59,7 @@ const UpdateInput = CourseInput.extend({ id: z.string().uuid() });
 
 export const updateCourse = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((v: unknown) => UpdateInput.parse(v))
+  .validator((v: unknown) => UpdateInput.parse(v))
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase
       .from("courses")
@@ -77,7 +77,7 @@ export const updateCourse = createServerFn({ method: "POST" })
 
 export const deleteCourse = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((v: unknown) => z.object({ id: z.string().uuid() }).parse(v))
+  .validator((v: unknown) => z.object({ id: z.string().uuid() }).parse(v))
   .handler(async ({ data, context }) => {
     const { error } = await context.supabase
       .from("courses")

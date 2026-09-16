@@ -1,58 +1,124 @@
-import { useState } from "react";
-import { Bell, Check, Sparkles, Mic, Zap, BookOpen, Clock, Flame, AlertCircle } from "lucide-react";
+import { useState, useMemo } from "react";
+import { Bell, Check, Mic, Zap, Flame, AlertCircle, CheckCircle2, BookOpen } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Button } from "@/components/ui/button";
+import { useQuery } from "@tanstack/react-query";
+import { getDashboardStats } from "@/lib/lectures.functions";
 
 interface NotificationItem {
   id: string;
   title: string;
   desc: string;
   time: string;
-  type: "lecture" | "flashcard" | "streak" | "revision";
+  type: "lecture" | "flashcard" | "streak" | "revision" | "success";
   read: boolean;
 }
 
-const initialNotifications: NotificationItem[] = [
-  {
-    id: "n1",
-    title: "Lecture Processing Complete",
-    desc: "Neural Networks & Deep Learning — Lecture 4 has been transcribed and key concepts indexed.",
-    time: "10m ago",
-    type: "lecture",
-    read: false,
-  },
-  {
-    id: "n2",
-    title: "Flashcard Deck Ready",
-    desc: "12 new spaced repetition flashcards generated for Machine Learning.",
-    time: "1h ago",
-    type: "flashcard",
-    read: false,
-  },
-  {
-    id: "n3",
-    title: "7-Day Learning Streak Active! 🔥",
-    desc: "Keep up the momentum by reviewing weak concepts in Linear Algebra.",
-    time: "3h ago",
-    type: "streak",
-    read: false,
-  },
-  {
-    id: "n4",
-    title: "Weak Topic Alert: Gradient Descent",
-    desc: "Concept mastery is at 45%. Review flashcards before the upcoming quiz.",
-    time: "1d ago",
-    type: "revision",
-    read: true,
-  },
-];
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 export function NotificationsPopover() {
-  const [items, setItems] = useState<NotificationItem[]>(initialNotifications);
+  const { data } = useQuery({
+    queryKey: ["dashboard"],
+    queryFn: () => getDashboardStats(),
+    staleTime: 30000,
+  });
+
+  const generated = useMemo<NotificationItem[]>(() => {
+    if (!data) return [];
+    const items: NotificationItem[] = [];
+
+    // Streak notification
+    if (data.streak > 0) {
+      items.push({
+        id: "streak",
+        title: `${data.streak}-Day Learning Streak Active! 🔥`,
+        desc: `Keep up the momentum — you've been learning for ${data.streak} consecutive days.`,
+        time: "now",
+        type: "streak",
+        read: false,
+      });
+    }
+
+    // Recent lecture completions
+    const recent = (data.recent ?? []) as Array<{ id: string; title: string; transcript_status: string; created_at: string }>;
+    const completed = recent.filter((l) => l.transcript_status === "completed");
+    const processing = recent.filter((l) => l.transcript_status === "processing" || l.transcript_status === "pending");
+    const failed = recent.filter((l) => l.transcript_status === "failed");
+
+    for (const l of completed.slice(0, 2)) {
+      items.push({
+        id: `done-${l.id}`,
+        title: "Lecture Processing Complete",
+        desc: `"${l.title}" has been transcribed and key concepts indexed.`,
+        time: timeAgo(l.created_at),
+        type: "success",
+        read: false,
+      });
+    }
+
+    for (const l of processing.slice(0, 1)) {
+      items.push({
+        id: `proc-${l.id}`,
+        title: "Lecture Processing…",
+        desc: `"${l.title}" is being transcribed. Notes will be generated automatically.`,
+        time: timeAgo(l.created_at),
+        type: "lecture",
+        read: false,
+      });
+    }
+
+    for (const l of failed.slice(0, 1)) {
+      items.push({
+        id: `fail-${l.id}`,
+        title: "Transcription Failed",
+        desc: `"${l.title}" — open the lecture to retry transcription.`,
+        time: timeAgo(l.created_at),
+        type: "revision",
+        read: false,
+      });
+    }
+
+    // Flashcard deck notification
+    if (data.flashcardsCount > 0) {
+      items.push({
+        id: "flashcards",
+        title: "Flashcard Decks Available",
+        desc: `${data.flashcardsCount} flashcards ready across your lectures. Study them in the Flashcards tab.`,
+        time: "recent",
+        type: "flashcard",
+        read: true,
+      });
+    }
+
+    // Knowledge stats
+    if (data.notesCount > 0) {
+      items.push({
+        id: "notes",
+        title: "AI Notes Generated",
+        desc: `${data.notesCount} lecture${data.notesCount > 1 ? "s" : ""} summarized with key points and glossary.`,
+        time: "recent",
+        type: "lecture",
+        read: true,
+      });
+    }
+
+    return items;
+  }, [data]);
+
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const items = generated.map((i) => ({ ...i, read: i.read || dismissed.has(i.id) }));
   const unreadCount = items.filter((i) => !i.read).length;
 
   const markAllRead = () => {
-    setItems((prev) => prev.map((i) => ({ ...i, read: true })));
+    setDismissed(new Set(items.map((i) => i.id)));
   };
 
   const getIcon = (type: NotificationItem["type"]) => {
@@ -61,6 +127,7 @@ export function NotificationsPopover() {
       case "flashcard": return <Zap className="h-4 w-4 text-info" />;
       case "streak": return <Flame className="h-4 w-4 text-warning" />;
       case "revision": return <AlertCircle className="h-4 w-4 text-destructive" />;
+      case "success": return <CheckCircle2 className="h-4 w-4 text-success" />;
     }
   };
 
@@ -101,29 +168,36 @@ export function NotificationsPopover() {
         </div>
 
         <div className="max-h-[320px] overflow-y-auto divide-y divide-border/30">
-          {items.map((item) => (
-            <div
-              key={item.id}
-              className={`p-3.5 flex items-start gap-3 transition-colors ${
-                !item.read ? "bg-primary/5" : "hover:bg-card/40"
-              }`}
-            >
-              <div className="p-2 rounded-lg bg-card border border-border/50 shrink-0 mt-0.5">
-                {getIcon(item.type)}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-1">
-                  <p className="text-xs font-semibold text-foreground truncate">{item.title}</p>
-                  <span className="font-mono text-[9px] text-muted-foreground shrink-0">{item.time}</span>
-                </div>
-                <p className="mt-1 text-[11px] text-muted-foreground leading-relaxed">{item.desc}</p>
-              </div>
+          {items.length === 0 ? (
+            <div className="flex flex-col items-center justify-center px-4 py-10 text-center">
+              <BookOpen className="mb-2 h-6 w-6 text-muted-foreground/40" />
+              <p className="text-xs text-muted-foreground">No activity yet. Add a lecture to get started!</p>
             </div>
-          ))}
+          ) : (
+            items.map((item) => (
+              <div
+                key={item.id}
+                className={`p-3.5 flex items-start gap-3 transition-colors ${
+                  !item.read ? "bg-primary/5" : "hover:bg-card/40"
+                }`}
+              >
+                <div className="p-2 rounded-lg bg-card border border-border/50 shrink-0 mt-0.5">
+                  {getIcon(item.type)}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-1">
+                    <p className="text-xs font-semibold text-foreground truncate">{item.title}</p>
+                    <span className="font-mono text-[9px] text-muted-foreground shrink-0">{item.time}</span>
+                  </div>
+                  <p className="mt-1 text-[11px] text-muted-foreground leading-relaxed">{item.desc}</p>
+                </div>
+              </div>
+            ))
+          )}
         </div>
 
         <div className="p-2.5 border-t border-border/40 bg-card/40 text-center">
-          <span className="font-mono text-[10px] text-muted-foreground">Real-time Telemetry & Reminders Active</span>
+          <span className="font-mono text-[10px] text-muted-foreground">Real-time Activity Feed</span>
         </div>
       </PopoverContent>
     </Popover>

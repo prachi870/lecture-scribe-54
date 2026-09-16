@@ -35,14 +35,6 @@ export const Route = createFileRoute("/_authenticated/analytics")({
 
 const PIE_COLORS = ["#10B981", "#3B82F6", "#F59E0B", "#EF4444", "#8B5CF6"];
 
-const mockConceptMastery = [
-  { concept: "Linear Algebra & Vectors", score: 88 },
-  { concept: "Backpropagation", score: 76 },
-  { concept: "Convolutional Neural Nets", score: 62 },
-  { concept: "Gradient Descent Optimization", score: 45 },
-  { concept: "Probability Distributions", score: 92 },
-];
-
 function AnalyticsPage() {
   const { data } = useSuspenseQuery(analyticsQ);
 
@@ -73,11 +65,13 @@ function AnalyticsPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-card/50 p-2 text-xs backdrop-blur">
-          <Award className="h-4 w-4 text-warning" />
-          <span className="font-semibold">7 Day Study Streak</span>
-          <span className="rounded-md bg-warning/20 px-1.5 py-0.5 font-mono text-[10px] font-bold text-warning">🔥 Active</span>
-        </div>
+        {data.streak > 0 && (
+          <div className="flex items-center gap-2 rounded-xl border border-border/60 bg-card/50 p-2 text-xs backdrop-blur">
+            <Award className="h-4 w-4 text-warning" />
+            <span className="font-semibold">{data.streak} Day Study Streak</span>
+            <span className="rounded-md bg-warning/20 px-1.5 py-0.5 font-mono text-[10px] font-bold text-warning">🔥 Active</span>
+          </div>
+        )}
       </div>
 
       {/* ── KPI Grid ── */}
@@ -105,25 +99,31 @@ function AnalyticsPage() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          {mockConceptMastery.map((c) => (
-            <div key={c.concept} className="rounded-xl border border-border/50 bg-background/40 p-3.5 text-left">
-              <p className="truncate text-xs font-semibold text-foreground">{c.concept}</p>
-              <div className="mt-2 flex items-center justify-between font-mono text-xs">
-                <span className="text-muted-foreground">Mastery</span>
-                <span className={`font-bold ${c.score < 50 ? "text-destructive" : c.score < 75 ? "text-warning" : "text-success"}`}>
-                  {c.score}%
-                </span>
+          {(data.conceptMastery ?? []).length > 0 ? (
+            (data.conceptMastery as Array<{ concept: string; score: number }>).map((c) => (
+              <div key={c.concept} className="rounded-xl border border-border/50 bg-background/40 p-3.5 text-left">
+                <p className="truncate text-xs font-semibold text-foreground">{c.concept}</p>
+                <div className="mt-2 flex items-center justify-between font-mono text-xs">
+                  <span className="text-muted-foreground">Mastery</span>
+                  <span className={`font-bold ${c.score < 50 ? "text-destructive" : c.score < 75 ? "text-warning" : "text-success"}`}>
+                    {c.score}%
+                  </span>
+                </div>
+                <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-border/50">
+                  <div
+                    className={`h-full rounded-full transition-all ${
+                      c.score < 50 ? "bg-destructive" : c.score < 75 ? "bg-warning" : "bg-success"
+                    }`}
+                    style={{ width: `${c.score}%` }}
+                  />
+                </div>
               </div>
-              <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-border/50">
-                <div
-                  className={`h-full rounded-full transition-all ${
-                    c.score < 50 ? "bg-destructive" : c.score < 75 ? "bg-warning" : "bg-success"
-                  }`}
-                  style={{ width: `${c.score}%` }}
-                />
-              </div>
+            ))
+          ) : (
+            <div className="col-span-full flex h-24 items-center justify-center text-xs text-muted-foreground">
+              Generate notes for your lectures to see concept mastery scores here.
             </div>
-          ))}
+          )}
         </div>
       </div>
 

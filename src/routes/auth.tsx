@@ -57,6 +57,8 @@ function AuthPage() {
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [canResend, setCanResend] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
 
   // Only auto-redirect to dashboard if user is already signed in AND
   // did not explicitly navigate to /auth to sign out or switch accounts.
@@ -95,6 +97,28 @@ function AuthPage() {
       setStatusMsg(null);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ── Resend email confirmation ──
+  const handleResend = async () => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) { toast.error("Enter your email address first."); return; }
+    setResendLoading(true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: trimmedEmail,
+        options: { emailRedirectTo: `${window.location.origin}/dashboard` },
+      });
+      if (error) throw error;
+      toast.success("Confirmation email resent! Check your inbox.");
+      setCanResend(false);
+      setStatusMsg(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to resend confirmation email");
+    } finally {
+      setResendLoading(false);
     }
   };
 
@@ -182,8 +206,9 @@ function AuthPage() {
             error.message.includes("Email not confirmed") ||
             error.message.includes("email_not_confirmed")
           ) {
+            setCanResend(true);
             setStatusMsg(
-              `Email not confirmed yet. Check your inbox for the confirmation link, or click ⚡ Quick Demo Sign In.`
+              `"${parsedEmail}" hasn't been confirmed yet. Click "Resend Confirmation Email" below, or use ⚡ Quick Demo Sign In for instant access.`
             );
             throw new Error("Email not confirmed. Check your inbox or use Quick Demo Sign In.");
           }
@@ -236,10 +261,15 @@ function AuthPage() {
           error.message.includes("OAuth") ||
           error.message.includes("missing OAuth secret")
         ) {
+          setCanResend(false);
           setStatusMsg(
-            "Google OAuth Setup Required: Go to Supabase Dashboard → Authentication → Providers → Google and enter your Google Cloud OAuth Client ID & Secret."
+            "Google Sign-In Setup Required — 2 steps: " +
+            "① Supabase Dashboard → Auth → Providers → Google → Enable → add Client ID & Secret. " +
+            "② Google Cloud Console → Credentials → OAuth Client → Authorized Redirect URIs → add: " +
+            "https://osdsmimrkkyiagalejim.supabase.co/auth/v1/callback  " +
+            "Then retry. Use ⚡ Demo Mode below for instant access."
           );
-          toast.error("Google OAuth requires Client ID & Secret in Supabase Dashboard. Use Demo Sign In below.", { duration: 8000 });
+          toast.error("Google sign-in needs one-time setup. See instructions below.", { duration: 8000 });
         } else {
           throw error;
         }
@@ -288,15 +318,28 @@ function AuthPage() {
         {statusMsg && (
           <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-warning/40 bg-warning/10 p-3 text-xs text-warning leading-relaxed">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <div>
-              <p>{statusMsg}</p>
-              <button
-                type="button"
-                onClick={handleDemoLogin}
-                className="mt-2 inline-flex items-center gap-1 font-semibold text-primary underline"
-              >
-                Launch Demo Mode Now →
-              </button>
+            <div className="min-w-0">
+              <p className="leading-relaxed">{statusMsg}</p>
+              <div className="mt-2 flex flex-wrap gap-3">
+                {canResend && (
+                  <button
+                    type="button"
+                    onClick={handleResend}
+                    disabled={resendLoading}
+                    className="inline-flex items-center gap-1 font-semibold text-primary underline disabled:opacity-50"
+                  >
+                    {resendLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "📧"}
+                    {resendLoading ? "Sending…" : "Resend Confirmation Email"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleDemoLogin}
+                  className="inline-flex items-center gap-1 font-semibold text-primary underline"
+                >
+                  ⚡ Demo Mode →
+                </button>
+              </div>
             </div>
           </div>
         )}

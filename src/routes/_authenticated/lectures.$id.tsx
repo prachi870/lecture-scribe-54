@@ -1,4 +1,4 @@
-import { Suspense, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { createFileRoute, Link, useNavigate, redirect } from "@tanstack/react-router";
 import { queryOptions, useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -110,8 +110,30 @@ function LectureDetail() {
   const qc = useQueryClient();
   const { data } = useSuspenseQuery(lectureQuery(id));
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const autoTranscribeRef = useRef(false);
 
   const retryFn = useServerFn(retryTranscription);
+
+  // Auto-trigger transcription when a lecture is stuck in "pending" state.
+  // This fires when the browser-side fire-and-forget from lectures.new.tsx failed
+  // (connection dropped before the server received it), or for YouTube videos
+  // with no subtitles that need Whisper audio transcription.
+  useEffect(() => {
+    if (
+      data.transcript_status === "pending" &&
+      (data.audio_path ||
+        data.source_url?.includes("youtube") ||
+        data.source_url?.includes("youtu.be")) &&
+      !autoTranscribeRef.current
+    ) {
+      autoTranscribeRef.current = true;
+      retryFn({ data: { id } }).catch((e: unknown) =>
+        console.error("[auto-transcribe]", e instanceof Error ? e.message : e)
+      );
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.transcript_status]);
+
   const deleteFn = useServerFn(deleteLecture);
   const notesFn = useServerFn(getLectureNotes);
   const genNotesFn = useServerFn(generateLectureNotes);

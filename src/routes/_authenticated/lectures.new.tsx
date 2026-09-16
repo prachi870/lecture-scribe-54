@@ -226,8 +226,8 @@ function NewLecture() {
                 className="mt-1.5"
               />
               <p className="mt-3 text-xs text-muted-foreground">
-                We fetch the video's captions (English) and generate AI notes. Videos without
-                subtitles can't be processed — download the audio and use the Upload tab instead.
+                Paste any public YouTube URL. Videos with subtitles are transcribed instantly.
+                Videos without subtitles are transcribed via audio — this may take 1–2 minutes.
               </p>
             </div>
           </TabsContent>
