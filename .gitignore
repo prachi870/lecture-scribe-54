@@ -36,3 +36,4 @@ dist-ssr
 # Vercel build output
 .vercel/output/
 .vercel/
+.git_disabled/ 

@@ -83,15 +83,15 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
     // JWT keys. getClaims() requires asymmetric keys and may not be available
     // on all Supabase project configurations.
     const { data, error } = await supabase.auth.getUser(token);
-    if (error || !data?.user) {
+    if (error || !data?.user) {    
       throw new Error('Unauthorized: Invalid or expired token');
     }
 
     return next({
       context: {
         supabase,
-        userId: data.user.id,
-        claims: data.user,
+        userId: data.user.id,  
+        claims: data.user,    
       },
     });
   },

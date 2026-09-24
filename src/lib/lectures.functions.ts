@@ -238,41 +238,25 @@ async function transcribeYouTubeAudio(videoId: string): Promise<string> {
 }
 
 async function fetchYouTubeTranscript(videoId: string): Promise<{ text: string; title: string }> {
-  // Strategy 1: youtubetranscript.com public API (bypasses server-IP blocking)
-  try {
-    const apiRes = await fetch(
-      `https://youtubetranscript.com/?server_vid=${videoId}`,
-      {
-        headers: {
-          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
-          "accept": "text/html,application/xhtml+xml",
-        },
-      }
-    );
-    if (apiRes.ok) {
-      const html = await apiRes.text();
-      // Extract title from OG tags or title tag
-      const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i) ||
-                         html.match(/og:title.*?content="([^"]+)"/);
-      const rawTitle = titleMatch?.[1] ?? "";
-      // Parse transcript XML embedded in the response
-      const xmlMatch = html.match(/<text[^>]*>([\s\S]*?)<\/text>/g);
-      if (xmlMatch && xmlMatch.length > 10) {
-        const text = xmlMatch
-          .map((t) => t.replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#39;/g, "'").replace(/&quot;/g, '"').trim())
-          .filter(Boolean)
-          .join(" ")
-          .replace(/\s+/g, " ")
-          .trim();
-        if (text.length > 100) {
-          const title = rawTitle.replace(/ - YouTube Transcript$/, "").trim() || `YouTube ${videoId}`;
-          return { text, title };
-        }
-      }
-    }
-  } catch {
-    // Strategy 1 failed — try strategy 2
+  console.log(`[fetchYouTubeTranscript] Fetching transcript for video: ${videoId}`);
+
+  const res = await fetch(
+    `https://api.supadata.ai/v1/youtube/transcript?videoId=${videoId}&text=true`,
+    { headers: { "x-api-key": process.env.SUPADATA_API_KEY! } }
+  );
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Supadata failed (${res.status}): ${body || "no details"}`);
   }
+
+  const data = await res.json() as { content: string; lang?: string };
+  if (!data.content?.trim()) {
+    throw new Error("Empty transcript returned for this video.");
+  }
+
+  return { text: data.content.trim(), title: `YouTube ${videoId}` };
+}
 
   // Strategy 2: Fetch YouTube watch page and parse captionTracks, then fetch via timedtext API
   const res = await fetch(`https://www.youtube.com/watch?v=${videoId}&hl=en`, {
@@ -411,8 +395,9 @@ export const ingestLectureFromUrl = createServerFn({ method: "POST" })
       const result = await fetchYouTubeTranscript(vid);
       captionText = result.text;
       title = result.title;
-    } catch {
+    } catch (captionError) {
       // Captions unavailable — fall back to audio transcription.
+      console.error("[fetchYouTubeTranscript failed]", captionError instanceof Error ? captionError.message : captionError);
       // Try to at least extract the video title from the YouTube page.
       try {
         const pageRes = await fetch(`https://www.youtube.com/watch?v=${vid}&hl=en`, {
