@@ -101,7 +101,7 @@ async function runTranscription(
         // YouTube video without subtitles — download audio and transcribe via Whisper
         const vid = extractYouTubeId(lecture.source_url);
         if (!vid) throw new Error("No audio file or valid YouTube URL found for this lecture.");
-        transcript = await transcribeYouTubeAudio(vid);
+        transcript = (await fetchYouTubeTranscript(vid)).text;
       } else {
         throw new Error("No audio file or YouTube source found for this lecture.");
       }
@@ -167,74 +167,6 @@ function extractYouTubeId(url: string): string | null {
   } catch {
     return null;
   }
-}
-
-// ── YouTube audio transcription (no-subtitle fallback) ───────────────────
-// Extracts audio via cobalt.tools or Piped API, then transcribes with Groq Whisper.
-async function transcribeYouTubeAudio(videoId: string): Promise<string> {
-  const youtubeUrl = `https://www.youtube.com/watch?v=${videoId}`;
-  let audioUrl: string | null = null;
-  let audioMime = "audio/mp4";
-
-  // Strategy A: cobalt.tools public REST API
-  try {
-    const cobaltRes = await fetch("https://api.cobalt.tools/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ url: youtubeUrl, downloadMode: "audio", audioFormat: "mp3", audioBitrate: "96" }),
-    });
-    if (cobaltRes.ok) {
-      const cobaltData = await cobaltRes.json() as { status?: string; url?: string };
-      if ((cobaltData.status === "redirect" || cobaltData.status === "tunnel") && cobaltData.url) {
-        audioUrl = cobaltData.url;
-        audioMime = "audio/mpeg";
-      }
-    }
-  } catch { /* fall through to Piped */ }
-
-  // Strategy B: Piped API public instances
-  if (!audioUrl) {
-    const PIPED_INSTANCES = [
-      "https://pipedapi.kavin.rocks",
-      "https://pipedapi.adminforge.de",
-      "https://api.piped.projectsegfault.com",
-    ];
-    for (const host of PIPED_INSTANCES) {
-      try {
-        const r = await fetch(`${host}/streams/${videoId}`, {
-          headers: { Accept: "application/json", "User-Agent": "Mozilla/5.0" },
-        });
-        if (!r.ok) continue;
-        const d = await r.json() as { audioStreams?: Array<{ url: string; mimeType?: string; bitrate?: number }> };
-        const streams = (d.audioStreams ?? []).sort((a, b) => (a.bitrate ?? 9e9) - (b.bitrate ?? 9e9));
-        const best = streams[0];
-        if (best?.url) { audioUrl = best.url; audioMime = best.mimeType ?? "audio/mp4"; break; }
-      } catch { continue; }
-    }
-  }
-
-  if (!audioUrl) {
-    throw new Error(
-      "Could not extract audio from this YouTube video. " +
-      "It may be private, age-restricted, or geo-blocked. " +
-      "Try downloading the audio manually and using the Upload tab."
-    );
-  }
-
-  // Download audio — Groq Whisper file size limit is 25 MB
-  const MAX_BYTES = 25 * 1024 * 1024;
-  const audioRes = await fetch(audioUrl, { headers: { Range: `bytes=0-${MAX_BYTES - 1}` } });
-  if (!audioRes.ok && audioRes.status !== 206) {
-    throw new Error(`Audio download failed: HTTP ${audioRes.status}`);
-  }
-  const audioBlob = await audioRes.blob();
-  if (!audioBlob.size) throw new Error("Downloaded audio was empty.");
-
-  const ext = audioMime.includes("mpeg") || audioMime.includes("mp3") ? "mp3"
-    : audioMime.includes("mp4") || audioMime.includes("m4a") ? "m4a"
-    : audioMime.includes("webm") ? "webm" : "mp3";
-
-  return geminiTranscribe(new Blob([audioBlob], { type: audioMime }), `yt_audio.${ext}`);
 }
 
 async function fetchYouTubeTranscript(videoId: string): Promise<{ text: string; title: string }> {
