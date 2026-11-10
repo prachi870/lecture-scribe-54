@@ -19,25 +19,39 @@ import { GoogleGenAI, Type } from "@google/genai";
 // ── Provider instances (lazy) ─────────────────────────────────────────────
 let _groq: Groq | null = null;
 let _gemini: GoogleGenAI | null = null;
+let _groqKey: string | null = null;
+let _geminiKey: string | null = null;
 
 function getGroq(): Groq {
-  if (_groq) return _groq;
   const key = process.env.GROQ_API_KEY?.trim();
   if (!key) throw new Error("NO_GROQ");
-  _groq = new Groq({ apiKey: key });
+  // Reset client if key changed
+  if (_groq && _groqKey !== key) {
+    _groq = null;
+  }
+  if (!_groq) {
+    _groq = new Groq({ apiKey: key });
+    _groqKey = key;
+  }
   return _groq;
 }
 
 function getGemini(): GoogleGenAI {
-  if (_gemini) return _gemini;
   const key = process.env.GEMINI_API_KEY?.trim();
   if (!key) throw new Error("AI_PROVIDER_NOT_CONFIGURED: Set GROQ_API_KEY or GEMINI_API_KEY in .env");
-  _gemini = new GoogleGenAI({ apiKey: key });
+  // Reset client if key changed
+  if (_gemini && _geminiKey !== key) {
+    _gemini = null;
+  }
+  if (!_gemini) {
+    _gemini = new GoogleGenAI({ apiKey: key });
+    _geminiKey = key;
+  }
   return _gemini;
 }
 
 // Gemini model rotation (fallback when Groq unavailable)
-const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"];
+const GEMINI_MODELS = ["gemini-2.0-flash-thinking-exp", "gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-2.0-flash-exp"];
 const GROQ_CHAT_MODEL = "qwen/qwen3.8-27b";
 const GROQ_TRANSCRIBE_MODEL = "whisper-large-v3-turbo";
 
@@ -242,6 +256,7 @@ export async function geminiChatJSON<T>(
     try { return await groqJSON<T>(prompt, systemPrompt); }
     catch (err) {
       const msg = err instanceof Error ? err.message : "";
+      console.error("[Groq Error]", msg);
       if (msg === "NO_GROQ") return geminiJSONWithRotation<T>(prompt, systemPrompt, schema);
       // Groq rate limit → fall through to Gemini
       if (msg.includes("429") || msg.includes("rate_limit")) {
