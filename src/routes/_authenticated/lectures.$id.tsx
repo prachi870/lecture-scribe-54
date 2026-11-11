@@ -18,6 +18,7 @@ import {
   RotateCcw,
   Calendar,
   AlertTriangle,
+  Image as ImageIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -29,6 +30,7 @@ import { TranscriptView } from "@/components/lectures/transcript-view";
 import { NotesPanel } from "@/components/lectures/notes-panel";
 import { FlashcardsPanel } from "@/components/lectures/flashcards-panel";
 import { ChatPanel } from "@/components/lectures/chat-panel";
+import { PosterPanel } from "@/components/lectures/poster-panel";
 import {
   chatWithLecture,
   checkAIProvider,
@@ -37,10 +39,13 @@ import {
   generateExamPrep,
   generateFlashcards,
   generateLectureNotes,
+  generateLecturePoster,
   generateMindMap,
+  generatePosterImage,
   generateRevisionPlan,
   getLecture,
   getLectureNotes,
+  getLecturePoster,
   listChatMessages,
   listFlashcards,
   retryTranscription,
@@ -145,6 +150,8 @@ function LectureDetail() {
   const genExamFn = useServerFn(generateExamPrep);
   const genMindFn = useServerFn(generateMindMap);
   const genRevisionFn = useServerFn(generateRevisionPlan);
+  const posterFn = useServerFn(getLecturePoster);
+  const genPosterFn = useServerFn(generateLecturePoster);
 
   // AI provider health check — shown when key is missing/blocked
   const aiStatusQuery = useQuery({
@@ -196,6 +203,12 @@ function LectureDetail() {
     enabled: false,
   });
 
+  const posterQuery = useQuery({
+    queryKey: ["poster", id],
+    queryFn: () => posterFn({ data: { id } }),
+    enabled: hasTranscript,
+  });
+
   const retry = useMutation({
     mutationFn: () => retryFn({ data: { id } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["lecture", id] }),
@@ -222,6 +235,23 @@ function LectureDetail() {
       toast.success("Flashcards generated");
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+  const genPoster = useMutation({
+    mutationFn: () => genPosterFn({ data: { id } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["poster", id] });
+      toast.success("Poster generated");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Failed"),
+  });
+  const genPosterImageFn = useServerFn(generatePosterImage);
+  const genPosterImage = useMutation({
+    mutationFn: () => genPosterImageFn({ data: { id } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["poster", id] });
+      toast.success("AI poster image generated");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Failed to generate image"),
   });
   const sendChat = useMutation({
     mutationFn: (message: string) => chatSendFn({ data: { lecture_id: id, message } }),
@@ -290,11 +320,12 @@ function LectureDetail() {
       )}
 
       <Tabs defaultValue="notes" className="mt-6">
-        <TabsList className="grid w-full grid-cols-7">
+        <TabsList className="grid w-full grid-cols-8">
           <TabsTrigger value="notes"><BookOpen className="mr-1.5 h-3.5 w-3.5" />Notes</TabsTrigger>
           <TabsTrigger value="transcript"><FileText className="mr-1.5 h-3.5 w-3.5" />Transcript</TabsTrigger>
           <TabsTrigger value="cards"><Zap className="mr-1.5 h-3.5 w-3.5" />Cards</TabsTrigger>
           <TabsTrigger value="chat"><MessagesSquare className="mr-1.5 h-3.5 w-3.5" />Chat</TabsTrigger>
+          <TabsTrigger value="poster"><ImageIcon className="mr-1.5 h-3.5 w-3.5" />Poster</TabsTrigger>
           <TabsTrigger value="examprep"><GraduationCap className="mr-1.5 h-3.5 w-3.5" />Exam Prep</TabsTrigger>
           <TabsTrigger value="mindmap"><Network className="mr-1.5 h-3.5 w-3.5" />Mind Map</TabsTrigger>
           <TabsTrigger value="revision"><Calendar className="mr-1.5 h-3.5 w-3.5" />Revision Plan</TabsTrigger>
@@ -339,6 +370,18 @@ function LectureDetail() {
             onClear={() => clearChatM.mutate()}
             onSeekTime={handleSeekTime}
             disabled={!hasTranscript}
+          />
+        </TabsContent>
+
+        <TabsContent value="poster" className="mt-5">
+          <PosterPanel
+            poster={posterQuery.data}
+            loading={posterQuery.isLoading}
+            onGenerate={() => genPoster.mutate()}
+            generating={genPoster.isPending}
+            onGenerateImage={() => genPosterImage.mutate()}
+            generatingImage={genPosterImage.isPending}
+            hasTranscript={hasTranscript}
           />
         </TabsContent>
 

@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { Loader2, Sparkles, RefreshCcw, ChevronLeft, ChevronRight, Zap } from "lucide-react";
+import { Loader2, Sparkles, RefreshCcw, ChevronLeft, ChevronRight, Zap, FileDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import jsPDF from "jspdf";
 
 type Card = { id: string; question: string; answer: string; difficulty: string };
 
@@ -19,6 +20,62 @@ export function FlashcardsPanel({
 }) {
   const [idx, setIdx] = useState(0);
   const [flipped, setFlipped] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+
+  const handleDownloadPdf = () => {
+    if (!cards.length) return;
+    
+    setDownloadingPdf(true);
+    try {
+      const pdf = new jsPDF();
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const margin = 20;
+      const maxWidth = pageWidth - 2 * margin;
+
+      // Title
+      pdf.setFontSize(18);
+      pdf.setFont("helvetica", "bold");
+      pdf.text("Flashcards", margin, 20);
+      
+      let yPos = 35;
+      
+      cards.forEach((card, index) => {
+        if (yPos > 250) {
+          pdf.addPage();
+          yPos = 20;
+        }
+
+        // Card number
+        pdf.setFontSize(10);
+        pdf.setFont("helvetica", "bold");
+        pdf.text(`Card ${index + 1} (${card.difficulty})`, margin, yPos);
+        yPos += 7;
+
+        // Question
+        pdf.setFontSize(11);
+        pdf.setFont("helvetica", "bold");
+        pdf.text("Q:", margin, yPos);
+        pdf.setFont("helvetica", "normal");
+        const qLines = pdf.splitTextToSize(card.question, maxWidth - 10);
+        pdf.text(qLines, margin + 10, yPos);
+        yPos += qLines.length * 5 + 5;
+
+        // Answer
+        pdf.setFont("helvetica", "bold");
+        pdf.text("A:", margin, yPos);
+        pdf.setFont("helvetica", "normal");
+        const aLines = pdf.splitTextToSize(card.answer, maxWidth - 10);
+        pdf.text(aLines, margin + 10, yPos);
+        yPos += aLines.length * 5 + 12;
+      });
+
+      pdf.save(`flashcards-${Date.now()}.pdf`);
+    } catch (error) {
+      console.error('PDF generation failed:', error);
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -71,14 +128,29 @@ export function FlashcardsPanel({
         <p className="text-xs text-muted-foreground">
           Card {idx + 1} of {cards.length}
         </p>
-        <Button size="sm" variant="ghost" onClick={onGenerate} disabled={generating}>
-          {generating ? (
-            <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <RefreshCcw className="mr-2 h-3.5 w-3.5" />
-          )}
-          Regenerate
-        </Button>
+        <div className="flex gap-2">
+          <Button 
+            size="sm" 
+            variant="outline" 
+            onClick={handleDownloadPdf}
+            disabled={downloadingPdf}
+          >
+            {downloadingPdf ? (
+              <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <FileDown className="mr-2 h-3.5 w-3.5" />
+            )}
+            {downloadingPdf ? "Generating PDF…" : "Download PDF"}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onGenerate} disabled={generating}>
+            {generating ? (
+              <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RefreshCcw className="mr-2 h-3.5 w-3.5" />
+            )}
+            Regenerate
+          </Button>
+        </div>
       </div>
 
       <button

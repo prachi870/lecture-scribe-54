@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { Database } from "@/integrations/supabase/types";
-import { geminiChatJSON, geminiChat, geminiTranscribe, NotesSchema, FlashcardSchema, ExamPrepSchema, MindMapSchema, RevisionPlanSchema } from "./gemini";
+import { geminiChatJSON, geminiChat, geminiTranscribe, NotesSchema, FlashcardSchema, ExamPrepSchema, MindMapSchema, RevisionPlanSchema, PosterSchema } from "./gemini";
 
 type AuthedSupabase = SupabaseClient<Database>;
 
@@ -1007,3 +1007,141 @@ export const getAnalyticsData = createServerFn({ method: "GET" })
     };
   });
 
+
+// ---------- Poster Generation ----------
+type PosterShape = {
+  title: string;
+  description: string;
+  concepts: Array<{ title: string; description: string; icon: string }>;
+  flow_steps: Array<{ step: number; title: string; description: string }>;
+  diagram_type: string;
+};
+
+async function runGeneratePoster(
+  supabase: AuthedSupabase,
+  userId: string,
+  lectureId: string,
+  transcript?: string,
+) {
+  let text = transcript;
+  if (!text) {
+    const { data } = await supabase
+      .from("lectures")
+      .select("transcript, title")
+      .eq("id", lectureId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    text = data?.transcript ?? "";
+  }
+  if (!text || text.trim().length < 20) {
+    throw new Error("No transcript available yet.");
+  }
+  
+  const truncated = text.slice(0, 20000);
+  const poster = await geminiChatJSON<PosterShape>(
+    `Transcript:\n\n${truncated}\n\nCreate a visual concept poster for this lecture. Return JSON with:
+- title: catchy title for the poster
+- description: brief 1-sentence description
+- concepts: array of 4-6 key concepts, each with title, description (1 sentence), and an appropriate emoji icon
+- flow_steps: array of 3-5 sequential steps/process flow with step number, title, and brief description
+- diagram_type: choose one of ["flowchart", "hierarchy", "process", "concept_map", "timeline"] that best represents this content`,
+    "You are an expert visual designer creating educational posters. Make concepts clear, visual, and memorable. Use appropriate emojis. Return ONLY valid JSON.",
+    PosterSchema,
+  );
+
+  await supabase.from("lecture_posters").upsert(
+    {
+      lecture_id: lectureId,
+      title: poster.title?.slice(0, 200) ?? "",
+      description: poster.description?.slice(0, 500) ?? "",
+      concepts: Array.isArray(poster.concepts) ? poster.concepts.slice(0, 10) : [],
+      flow_steps: Array.isArray(poster.flow_steps) ? poster.flow_steps.slice(0, 10) : [],
+      diagram_type: poster.diagram_type ?? "concept_map",
+      generated_at: new Date().toISOString(),
+    },
+    { onConflict: "lecture_id" },
+  );
+  return { ok: true };
+}
+
+export const generateLecturePoster = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((v: unknown) => IdInput.parse(v))
+  .handler(async ({ data, context }) => {
+    return runGeneratePoster(context.supabase, context.userId, data.id);
+  });
+
+export const getLecturePoster = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((v: unknown) => IdInput.parse(v))
+  .handler(async ({ data, context }) => {
+    const { data: row } = await context.supabase
+      .from("lecture_posters")
+      .select("title, description, concepts, flow_steps, diagram_type, image_url, generated_at")
+      .eq("lecture_id", data.id)
+      .maybeSingle();
+    return row;
+  });
+
+
+// Generate poster image using Hugging Face
+export const generatePosterImage = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .validator((v: unknown) => IdInput.parse(v))
+  .handler(async ({ data, context }) => {
+    const { data: poster } = await context.supabase
+      .from("lecture_posters")
+      .select("title, description")
+      .eq("lecture_id", data.id)
+      .maybeSingle();
+
+    if (!poster) throw new Error("Generate poster content first");
+
+    const hfApiKey = process.env.HUGGINGFACE_API_KEY?.trim();
+    if (!hfApiKey) {
+      return { error: "Hugging Face API key not configured. Add HUGGINGFACE_API_KEY to .env" };
+    }
+
+    try {
+      const imagePrompt = `Educational infographic poster: "${poster.title}". ${poster.description}. Clean professional academic design with diagrams, flowcharts, visual concepts. Minimalist style, pastel colors, icons, clear typography. High quality educational poster.`;
+      
+      const response = await fetch(
+        "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0",
+        {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${hfApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            inputs: imagePrompt,
+            parameters: {
+              num_inference_steps: 35,
+              guidance_scale: 7.5,
+              width: 1024,
+              height: 1536,
+            }
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.text();
+        return { error: `Image generation failed: ${error}` };
+      }
+
+      const blob = await response.blob();
+      const arrayBuffer = await blob.arrayBuffer();
+      const base64 = Buffer.from(arrayBuffer).toString('base64');
+      const imageUrl = `data:image/png;base64,${base64}`;
+
+      await context.supabase
+        .from("lecture_posters")
+        .update({ image_url: imageUrl })
+        .eq("lecture_id", data.id);
+
+      return { imageUrl };
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : "Image generation failed" };
+    }
+  });

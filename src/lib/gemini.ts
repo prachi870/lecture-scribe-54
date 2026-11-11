@@ -417,3 +417,43 @@ export const RevisionPlanSchema = {
   },
   required: ["title", "total_days", "daily_plan"],
 };
+
+export const PosterSchema = {
+  type: Type.OBJECT,
+  properties: {
+    title: { type: Type.STRING, description: "Main title for the poster" },
+    description: { type: Type.STRING, description: "Brief description of the lecture topic" },
+    concepts: {
+      type: Type.ARRAY,
+      description: "Key concepts with icons and descriptions",
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          title: { type: Type.STRING },
+          description: { type: Type.STRING },
+          icon: { type: Type.STRING, description: "Emoji icon representing the concept" },
+        },
+        required: ["title", "description", "icon"],
+      },
+    },
+    flow_steps: {
+      type: Type.ARRAY,
+      description: "Sequential steps or process flow",
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          step: { type: Type.INTEGER },
+          title: { type: Type.STRING },
+          description: { type: Type.STRING },
+        },
+        required: ["step", "title", "description"],
+      },
+    },
+    diagram_type: { 
+      type: Type.STRING, 
+      enum: ["flowchart", "hierarchy", "process", "concept_map", "timeline"],
+      description: "Type of diagram to visualize"
+    },
+  },
+  required: ["title", "description", "concepts", "flow_steps", "diagram_type"],
+};
