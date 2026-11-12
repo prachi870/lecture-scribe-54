@@ -147,12 +147,12 @@ export function NotificationsPopover() {
         </button>
       </PopoverTrigger>
 
-      <PopoverContent className="glass-card w-80 sm:w-96 p-0" align="end">
-        <div className="flex items-center justify-between border-b border-border/50 p-3.5">
+      <PopoverContent className="w-80 sm:w-96 p-0 bg-background/95 backdrop-blur-xl border-border" align="end">
+        <div className="flex items-center justify-between border-b border-border/50 p-3.5 bg-card/80">
           <div className="flex items-center gap-2">
-            <h4 className="text-xs font-bold tracking-tight">Notifications</h4>
+            <h4 className="text-xs font-bold tracking-tight text-foreground">Notifications</h4>
             {unreadCount > 0 && (
-              <span className="rounded-full bg-primary/10 px-2 py-0.5 font-mono text-[9px] font-semibold text-primary">
+              <span className="rounded-full bg-primary/20 px-2 py-0.5 font-mono text-[9px] font-semibold text-primary">
                 {unreadCount} new
               </span>
             )}
@@ -169,7 +169,7 @@ export function NotificationsPopover() {
 
         <div className="max-h-[320px] overflow-y-auto divide-y divide-border/30">
           {items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center px-4 py-10 text-center">
+            <div className="flex flex-col items-center justify-center px-4 py-10 text-center bg-card/40">
               <BookOpen className="mb-2 h-6 w-6 text-muted-foreground/40" />
               <p className="text-xs text-muted-foreground">No activity yet. Add a lecture to get started!</p>
             </div>
@@ -178,26 +178,26 @@ export function NotificationsPopover() {
               <div
                 key={item.id}
                 className={`p-3.5 flex items-start gap-3 transition-colors ${
-                  !item.read ? "bg-primary/5" : "hover:bg-card/40"
+                  !item.read ? "bg-primary/10 hover:bg-primary/15" : "bg-card/60 hover:bg-card/80"
                 }`}
               >
-                <div className="p-2 rounded-lg bg-card border border-border/50 shrink-0 mt-0.5">
+                <div className="p-2 rounded-lg bg-background border border-border/60 shrink-0 mt-0.5">
                   {getIcon(item.type)}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-1">
                     <p className="text-xs font-semibold text-foreground truncate">{item.title}</p>
-                    <span className="font-mono text-[9px] text-muted-foreground shrink-0">{item.time}</span>
+                    <span className="font-mono text-[9px] text-muted-foreground/80 shrink-0">{item.time}</span>
                   </div>
-                  <p className="mt-1 text-[11px] text-muted-foreground leading-relaxed">{item.desc}</p>
+                  <p className="mt-1 text-[11px] text-foreground/70 leading-relaxed">{item.desc}</p>
                 </div>
               </div>
             ))
           )}
         </div>
 
-        <div className="p-2.5 border-t border-border/40 bg-card/40 text-center">
-          <span className="font-mono text-[10px] text-muted-foreground">Real-time Activity Feed</span>
+        <div className="p-2.5 border-t border-border/40 bg-card/60 text-center">
+          <span className="font-mono text-[10px] text-muted-foreground/80">Real-time Activity Feed</span>
         </div>
       </PopoverContent>
     </Popover>

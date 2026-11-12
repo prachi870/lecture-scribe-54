@@ -41,6 +41,7 @@ const lecturesQuery = queryOptions({
 });
 
 export const Route = createFileRoute("/_authenticated/courses/$id")({
+  ssr: false,
   head: () => ({
     meta: [{ title: "Course — AuraLearn AI" }],
   }),
