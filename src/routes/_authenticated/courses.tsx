@@ -198,15 +198,23 @@ function CoursesPage() {
                   <span>{c.lectureCount} lecture{c.lectureCount === 1 ? "" : "s"}</span>
                 </div>
 
-                <Link
-                  to="/courses/$id"
-                  params={{ id: c.id }}
-                  className="flex items-center gap-1 text-[11px] font-medium text-primary transition-colors hover:text-primary/80"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Sparkles className="h-3 w-3" />
-                  <span>View course</span>
-                </Link>
+                <div className="flex items-center gap-2">
+                  <Button asChild size="sm" variant="outline" className="h-7 text-[11px]">
+                    <Link to="/lectures/new" search={{ courseId: c.id }}>
+                      <Plus className="h-3 w-3 mr-1" />
+                      Add Lecture
+                    </Link>
+                  </Button>
+                  
+                  <Link
+                    to="/courses/$id"
+                    params={{ id: c.id }}
+                    className="flex items-center gap-1 text-[11px] font-medium text-primary transition-colors hover:text-primary/80 hover:underline"
+                  >
+                    <Sparkles className="h-3 w-3" />
+                    <span>View</span>
+                  </Link>
+                </div>
               </div>
             </div>
           ))}

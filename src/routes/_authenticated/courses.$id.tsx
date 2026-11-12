@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -26,22 +26,35 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/lectures/status-badge";
-import { deleteCourse, listCourses, updateCourse } from "@/lib/courses.functions";
+import { deleteCourse, getCourse, updateCourse } from "@/lib/courses.functions";
 import { listLectures } from "@/lib/lectures.functions";
 
-// ── query helpers ────────────────────────────────────────────────
-const coursesQ = queryOptions({ queryKey: ["courses"], queryFn: () => listCourses() });
-const lecturesQ = queryOptions({ queryKey: ["lectures"], queryFn: () => listLectures() });
+const courseQuery = (id: string) =>
+  queryOptions({
+    queryKey: ["course", id],
+    queryFn: () => getCourse({ data: { id } }),
+  });
+
+const lecturesQuery = queryOptions({
+  queryKey: ["lectures"],
+  queryFn: () => listLectures(),
+});
 
 export const Route = createFileRoute("/_authenticated/courses/$id")({
   head: () => ({
     meta: [{ title: "Course — AuraLearn AI" }],
   }),
-  loader: ({ context }) => Promise.all([
-    context.queryClient.ensureQueryData(coursesQ),
-    context.queryClient.ensureQueryData(lecturesQ),
-  ]),
-  component: CourseDetail,
+  loader: ({ context, params }) => {
+    return Promise.all([
+      context.queryClient.ensureQueryData(courseQuery(params.id)),
+      context.queryClient.ensureQueryData(lecturesQuery),
+    ]);
+  },
+  component: () => (
+    <Suspense fallback={<div className="flex h-screen items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div>}>
+      <CourseDetail />
+    </Suspense>
+  ),
 });
 
 const COLORS = ["#8B5CF6", "#EC4899", "#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#06B6D4", "#A855F7"];
@@ -57,20 +70,20 @@ function CourseDetail() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
+  
   const updateFn = useServerFn(updateCourse);
   const deleteFn = useServerFn(deleteCourse);
 
-  const { data: courses } = useSuspenseQuery(coursesQ);
-  const { data: allLectures } = useSuspenseQuery(lecturesQ);
-
-  const course = courses.find((c) => c.id === id);
-  const lectures = allLectures.filter((l) => l.course_id === id);
+  const { data: course } = useSuspenseQuery(courseQuery(id));
+  const { data: allLectures } = useSuspenseQuery(lecturesQuery);
 
   const [editOpen, setEditOpen] = useState(false);
-  const [title, setTitle] = useState(course?.title ?? "");
-  const [code, setCode] = useState(course?.code ?? "");
-  const [description, setDescription] = useState(course?.description ?? "");
-  const [color, setColor] = useState(course?.color ?? COLORS[0]);
+  const [title, setTitle] = useState("");
+  const [code, setCode] = useState("");
+  const [description, setDescription] = useState("");
+  const [color, setColor] = useState(COLORS[0]);
+
+  const lectures = allLectures.filter((l) => l.course_id === id);
 
   const openEdit = () => {
     setTitle(course?.title ?? "");
@@ -84,6 +97,7 @@ function CourseDetail() {
     mutationFn: () =>
       updateFn({ data: { id, title: title.trim(), code: code.trim() || null, description: description.trim() || null, color } }),
     onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["course", id] });
       await qc.invalidateQueries({ queryKey: ["courses"] });
       toast.success("Course updated");
       setEditOpen(false);
@@ -101,7 +115,6 @@ function CourseDetail() {
     onError: (e) => toast.error(e instanceof Error ? e.message : "Failed"),
   });
 
-  // Course not found guard
   if (!course) {
     return (
       <div className="mx-auto max-w-4xl px-6 py-8">
@@ -119,14 +132,11 @@ function CourseDetail() {
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-8">
-      {/* ── Back ── */}
       <Link to="/courses" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
         <ArrowLeft className="h-3.5 w-3.5" /> All courses
       </Link>
 
-      {/* ── Course Header ── */}
       <div className="mt-4 overflow-hidden rounded-2xl border border-border/60 bg-card/50 backdrop-blur">
-        {/* colour bar */}
         <div className="h-2 w-full" style={{ background: course.color }} />
         <div className="flex flex-wrap items-start justify-between gap-4 px-6 py-5">
           <div className="min-w-0">
@@ -171,14 +181,13 @@ function CourseDetail() {
         </div>
       </div>
 
-      {/* ── Lectures in this course ── */}
       <div className="mt-8">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
             Lectures in this course
           </h2>
           <Button asChild size="sm" className="shadow-md shadow-primary/20">
-            <Link to="/lectures/new">
+            <Link to="/lectures/new" search={{ courseId: id }}>
               <Plus className="mr-1.5 h-3.5 w-3.5" /> Add lecture
             </Link>
           </Button>
@@ -194,7 +203,7 @@ function CourseDetail() {
               Record or upload a lecture and assign it to <span className="font-medium text-foreground">{course.title}</span>.
             </p>
             <Button asChild size="sm" className="mt-5">
-              <Link to="/lectures/new">
+              <Link to="/lectures/new" search={{ courseId: id }}>
                 <Plus className="mr-1.5 h-3.5 w-3.5" /> New lecture
               </Link>
             </Button>
@@ -225,7 +234,6 @@ function CourseDetail() {
         )}
       </div>
 
-      {/* ── Edit Dialog ── */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="glass-card sm:max-w-md">
           <DialogHeader>

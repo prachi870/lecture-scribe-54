@@ -10,6 +10,33 @@ const CourseInput = z.object({
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
 });
 
+const IdInput = z.object({ id: z.string() });
+
+export const getCourse = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .validator((v: unknown) => IdInput.parse(v))
+  .handler(async ({ data, context }) => {
+    try {
+      const { data: course, error } = await context.supabase
+        .from("courses")
+        .select("*")
+        .eq("id", data.id)
+        .eq("user_id", context.userId)
+        .maybeSingle();
+      
+      if (error) {
+        console.error("getCourse database error:", error);
+        throw new Error(error.message);
+      }
+      
+      console.log("getCourse result:", course ? "found" : "null", "for id:", data.id);
+      return course;
+    } catch (err) {
+      console.error("getCourse handler error:", err);
+      throw err;
+    }
+  });
+
 export const listCourses = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
