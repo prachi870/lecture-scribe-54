@@ -1,8 +1,7 @@
 import { Loader2, Sparkles, RefreshCcw, Image as ImageIcon, Download, ArrowRight, FileDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import jsPDF from "jspdf";
-import html2canvas from "html2canvas";
 
 type Poster = {
   image_url: string | null;
@@ -31,34 +30,126 @@ export function PosterPanel({
   generatingImage: boolean;
   hasTranscript: boolean;
 }) {
-  const posterRef = useRef<HTMLDivElement>(null);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   const handleDownloadPdf = async () => {
-    if (!posterRef.current) return;
+    if (!poster) {
+      console.log('No poster data found');
+      return;
+    }
     
     setDownloadingPdf(true);
     try {
-      const canvas = await html2canvas(posterRef.current, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-      });
+      console.log('Starting PDF generation...');
       
-      const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
         format: 'a4',
       });
       
-      const imgWidth = 210; // A4 width in mm
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      const margin = 20;
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const maxWidth = pageWidth - 2 * margin;
+      let yPos = 20;
       
-      pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+      // Title
+      pdf.setFontSize(20);
+      pdf.setFont("helvetica", "bold");
+      if (poster.title) {
+        const titleLines = pdf.splitTextToSize(poster.title, maxWidth);
+        pdf.text(titleLines, margin, yPos);
+        yPos += titleLines.length * 8 + 10;
+      }
+      
+      // Description
+      if (poster.description) {
+        pdf.setFontSize(11);
+        pdf.setFont("helvetica", "normal");
+        const descLines = pdf.splitTextToSize(poster.description, maxWidth);
+        pdf.text(descLines, margin, yPos);
+        yPos += descLines.length * 6 + 15;
+      }
+      
+      // Flow Steps
+      const flowSteps = Array.isArray(poster.flow_steps)
+        ? (poster.flow_steps as Array<{ step: number; title: string; description: string }>)
+        : [];
+        
+      if (flowSteps.length > 0) {
+        if (yPos > 250) {
+          pdf.addPage();
+          yPos = 20;
+        }
+        
+        pdf.setFontSize(14);
+        pdf.setFont("helvetica", "bold");
+        pdf.text("Process Flow", margin, yPos);
+        yPos += 10;
+        
+        flowSteps.forEach((step) => {
+          if (yPos > 260) {
+            pdf.addPage();
+            yPos = 20;
+          }
+          
+          pdf.setFontSize(12);
+          pdf.setFont("helvetica", "bold");
+          pdf.text(`${step.step}. ${step.title}`, margin, yPos);
+          yPos += 6;
+          
+          pdf.setFontSize(10);
+          pdf.setFont("helvetica", "normal");
+          const stepLines = pdf.splitTextToSize(step.description, maxWidth);
+          pdf.text(stepLines, margin, yPos);
+          yPos += stepLines.length * 5 + 8;
+        });
+        
+        yPos += 5;
+      }
+      
+      // Key Concepts
+      const concepts = Array.isArray(poster.concepts) 
+        ? (poster.concepts as Array<{ title: string; description: string; icon?: string }>) 
+        : [];
+        
+      if (concepts.length > 0) {
+        if (yPos > 250) {
+          pdf.addPage();
+          yPos = 20;
+        }
+        
+        pdf.setFontSize(14);
+        pdf.setFont("helvetica", "bold");
+        pdf.text("Key Concepts", margin, yPos);
+        yPos += 10;
+        
+        concepts.forEach((concept) => {
+          if (yPos > 260) {
+            pdf.addPage();
+            yPos = 20;
+          }
+          
+          pdf.setFontSize(11);
+          pdf.setFont("helvetica", "bold");
+          const conceptTitle = concept.icon ? `${concept.icon} ${concept.title}` : concept.title;
+          pdf.text(conceptTitle, margin, yPos);
+          yPos += 6;
+          
+          pdf.setFontSize(10);
+          pdf.setFont("helvetica", "normal");
+          const conceptLines = pdf.splitTextToSize(concept.description, maxWidth);
+          pdf.text(conceptLines, margin, yPos);
+          yPos += conceptLines.length * 5 + 8;
+        });
+      }
+      
+      console.log('Saving PDF...');
       pdf.save(`lecture-poster-${Date.now()}.pdf`);
+      console.log('PDF saved successfully!');
     } catch (error) {
       console.error('PDF generation failed:', error);
+      alert(`Failed to generate PDF: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setDownloadingPdf(false);
     }
@@ -107,13 +198,53 @@ export function PosterPanel({
     : [];
 
   const handleDownload = () => {
-    if (poster.image_url) {
-      const link = document.createElement('a');
-      link.href = poster.image_url;
-      link.download = `lecture-poster-${Date.now()}.png`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+    console.log('Download button clicked');
+    console.log('Image URL:', poster.image_url);
+    
+    if (!poster.image_url) {
+      console.log('No image URL found');
+      return;
+    }
+    
+    try {
+      // If it's a base64 data URL, we need to handle it differently
+      if (poster.image_url.startsWith('data:')) {
+        console.log('Downloading base64 image...');
+        const link = document.createElement('a');
+        link.href = poster.image_url;
+        link.download = `lecture-poster-image-${Date.now()}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        console.log('Download triggered');
+      } else {
+        console.log('Fetching remote image...');
+        // Regular URL
+        fetch(poster.image_url)
+          .then(res => {
+            console.log('Fetch response:', res.status);
+            return res.blob();
+          })
+          .then(blob => {
+            console.log('Blob received, size:', blob.size);
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `lecture-poster-image-${Date.now()}.png`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+            console.log('Download completed');
+          })
+          .catch(err => {
+            console.error('Fetch error:', err);
+            alert(`Failed to download image: ${err.message}`);
+          });
+      }
+    } catch (error) {
+      console.error('Download failed:', error);
+      alert(`Failed to download: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -170,7 +301,7 @@ export function PosterPanel({
       </div>
 
       {/* Enhanced Visual Poster Design */}
-      <div ref={posterRef} className="relative overflow-hidden rounded-2xl border-2 border-primary/20 bg-gradient-to-br from-primary/5 via-card to-primary/5 p-8">
+      <div className="relative overflow-hidden rounded-2xl border-2 border-primary/20 bg-gradient-to-br from-primary/5 via-card to-primary/5 p-8">
         {/* Decorative background patterns */}
         <div className="absolute inset-0 opacity-5">
           <svg className="h-full w-full" xmlns="http://www.w3.org/2000/svg">
